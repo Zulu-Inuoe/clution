@@ -180,7 +180,7 @@
                                            :if (string-equal system-name name)
                                            :return (parse-namestring path)))
             (clution-do ()
-              ,lispexpr))
+                        ,lispexpr))
        (let* ((asdf:*system-definition-search-functions*
                (list* (function clution-system-searcher)
                       asdf:*system-definition-search-functions*))
@@ -247,21 +247,24 @@
     (process-put proc 'clution--lisp-process t)
     proc))
 
-(defun clution--spawn-script (dir script-path)
-  (let* ((term-command (list* "cmd.exe" "/C" "start"
-                              (clution--spawn-script-command)
-                              (clution--spawn-script-args script-path)))
-         (default-directory dir)
-         (proc (apply #'start-process "clution-spawn-script" nil term-command)))
-    (set-process-sentinel
-     proc
-     (lambda (proc _)
-       (when (and (eq (process-status proc) 'exit) (/= (process-exit-status proc) 0))
-         (message "Error: in terminal here, command `%s` exited with error code %d"
-                  (mapconcat #'identity term-command " ")
-                  (process-exit-status proc)))))
-    ;; Don't close when emacs closes, seems to only be necessary on Windows.
-    (set-process-query-on-exit-flag proc nil)))
+(defun clution--arglist-to-string (arglist)
+  (with-temp-buffer
+    (dolist (s arglist)
+      (insert " \"" (replace-regexp-in-string "\"" "\\\"" s) "\""))
+    (buffer-string)))
+
+(defun clution--spawn-script (dir script-path sentinel)
+  (let* ((default-directory dir)
+         (proc
+          (start-process-shell-command
+           "clution-spawn-script"
+           nil
+           (concat
+            "start "
+            (clution--spawn-script-command)
+            (clution--arglist-to-string
+             (clution--spawn-script-args script-path))))))
+    (set-process-sentinel proc sentinel)))
 
 (defun clution--eval-in-proc (proc sexpr)
   (process-send-string proc (format "%S\n" sexpr)))
@@ -341,8 +344,14 @@
   (setf *clution--current-op* nil)
   (run-hooks 'clution-build-complete-hook))
 
-(defun clution--run-build-complete-hook ()
-  (remove-hook 'clution-build-complete-hook 'clution--run-build-complete-hook)
+(defun clution--run-sentinel (proc event)
+  (case (process-status proc)
+    (exit
+     (let ((status (process-exit-status proc)))
+       (clution--append-output "Finished running. Exited with code " (number-to-string status) "(0x" (format "%x" status) ")\n\n")))))
+
+(defun clution--run-on-build-complete ()
+  (remove-hook 'clution-build-complete-hook 'clution--run-on-build-complete)
 
   (unless (clution--system.toplevel (clution--clution.selected-system))
     (error "Cannot run '%S', no toplevel defined" (clution--system.name (clution--clution.selected-system))))
@@ -358,7 +367,7 @@
                   (clution--system.name (clution--clution.selected-system))
                   "-script.lisp"))
          (script-dir (file-name-directory script-path)))
-    (clution--append-output "Generating script " script-path "\n")
+    (clution--append-output "Generating script " script-path "\n\n")
 
     (unless (file-exists-p script-dir)
       (make-directory script-dir))
@@ -368,12 +377,13 @@
      nil
      script-path)
 
-    (clution--spawn-script (clution--spawn-dir) script-path)))
+    (clution--append-output "Running script\n\n")
+    (clution--spawn-script (clution--spawn-dir) script-path 'clution--run-sentinel)))
 
 (defun clution-run ()
   (interactive)
 
-  (add-hook 'clution-build-complete-hook 'clution--run-build-complete-hook)
+  (add-hook 'clution-build-complete-hook 'clution--run-on-build-complete)
 
   (clution--kickoff-build (list (clution--clution.selected-system))))
 

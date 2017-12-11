@@ -318,13 +318,23 @@
   (case (process-status proc)
     (exit
      (let ((status (process-exit-status proc)))
-       (clution--append-output "Finished running. Exited with code " (number-to-string status) "(0x" (format "%x" status) ")\n\n")))))
+       (clution--append-output "Finished running. Exited with code " (number-to-string status) "(0x" (format "%x" status) ")\n\n"))
+     (clution--run-complete))))
+
+(defun clution--run-complete ()
+  (setf *clution--current-op* nil)
+  (run-hooks 'clution-run-complete-hook))
 
 (defun clution--run-on-build-complete ()
   (remove-hook 'clution-build-complete-hook 'clution--run-on-build-complete)
 
   (unless (clution--system.toplevel (clution--clution.selected-system))
     (error "Cannot run '%S', no toplevel defined" (clution--system.name (clution--clution.selected-system))))
+
+  (setf *clution--current-op*
+        (list
+         :type 'clution-run
+         :toplevel (clution--system.toplevel (clution--clution.selected-system))))
 
   (clution--append-output
    "Running: '" (clution--clution.name)
@@ -403,6 +413,8 @@
   (interactive)
 
   (cond
+   (*clution--current-op*
+    (message "clution: busy doing op: '%s'" (getf *clution--current-op* :type)))
    (*clution--current-clution*
     (clution--clear-output)
     (clution--kickoff-build (clution--clution.systems)))
@@ -413,18 +425,21 @@
   (interactive)
 
   (cond
+   (*clution--current-op*
+    (message "clution: busy doing op: '%s'" (getf *clution--current-op* :type)))
    (*clution--current-clution*
     (clution--clear-output)
     (add-hook 'clution-build-complete-hook 'clution--run-on-build-complete)
     (clution--kickoff-build (list (clution--clution.selected-system))))
    (t
-    (message "clution: no clution open")
-    nil)))
+    (message "clution: no clution open"))))
 
 (defun clution-clean ()
   (interactive)
 
   (cond
+   (*clution--current-op*
+    (message "clution: busy doing op: '%s'" (getf *clution--current-op* :type)))
    (*clution--current-clution*
     (clution--clear-output)
     (clution--append-output

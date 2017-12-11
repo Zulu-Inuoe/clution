@@ -197,7 +197,7 @@
 (defun clution--args-list-form ()
   (ecase clution-backend
     (sbcl
-     'sb-ext:*posix-argv*)))
+     '(cdr sb-ext:*posix-argv*))))
 
 (defun clution--exit-form (exit-code-form)
   (ecase clution-backend

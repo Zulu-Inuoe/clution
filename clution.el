@@ -321,7 +321,6 @@
 (defun clution--kickoff-build (systems)
   (when *clution--current-op*
     (error "Already running clution operation '%S'" *clution--current-op*))
-  (clution--clear-output)
 
   (clution--append-output
    "Build starting: '" (clution--clution.name)
@@ -334,10 +333,6 @@
   (setf *clution--build-remaining-systems* systems)
 
   (clution--continue-build))
-
-(defun clution-build ()
-  (interactive)
-  (clution--kickoff-build (clution--clution.systems)))
 
 (defun clution--build-complete ()
   (clution--append-output
@@ -382,12 +377,29 @@
     (clution--append-output "Running script\n\n")
     (clution--spawn-script (clution--spawn-dir) script-path 'clution--run-sentinel)))
 
+(defun clution-build ()
+  (interactive)
+
+  (cond
+   (*clution--current-clution*
+    (clution--clear-output)
+    (clution--kickoff-build (clution--clution.systems)))
+   (t
+    (message "clution: no clution open"))))
+
 (defun clution-run ()
   (interactive)
 
-  (add-hook 'clution-build-complete-hook 'clution--run-on-build-complete)
+  (cond
+   (*clution--current-clution*
+    (clution--clear-output)
+    (add-hook 'clution-build-complete-hook 'clution--run-on-build-complete)
+    (clution--kickoff-build (list (clution--clution.selected-system))))
+   (t
+    (message "clution: no clution open")
+    nil)))
 
-  (clution--kickoff-build (list (clution--clution.selected-system))))
+
 
 (defun clution-open (path)
   (interactive

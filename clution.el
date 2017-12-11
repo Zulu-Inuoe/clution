@@ -223,7 +223,7 @@
               (*trace-output* (make-broadcast-stream)))
           (asdf:load-system ,system-name :verbose nil))
 
-        (let ((ret-code (funcall (read-from-string ,toplevel) ,(clution--args-list-form))))
+        (let ((ret-code (apply (read-from-string ,toplevel) ,(clution--args-list-form))))
           (if (integerp ret-code)
               ,(clution--exit-form 'ret-code)
             ,(clution--exit-form 0)))))))
@@ -257,7 +257,7 @@
               "^\""))
     (buffer-string)))
 
-(defun clution--spawn-script (dir script-path sentinel)
+(defun clution--spawn-script (dir script-path script-args sentinel)
   (let* ((default-directory dir)
          (proc
           (start-process-shell-command
@@ -269,7 +269,7 @@
             (clution--spawn-script-command)
             " "
             (clution--arglist-to-string
-             (clution--spawn-script-args script-path))))))
+             (clution--spawn-script-args script-path script-args))))))
     (set-process-sentinel proc sentinel)))
 
 (defun clution--eval-in-proc (proc sexpr)
@@ -389,7 +389,7 @@
      script-path)
 
     (clution--append-output "Running script\n\n")
-    (clution--spawn-script (clution--spawn-dir) script-path 'clution--run-sentinel)))
+    (clution--spawn-script (clution--spawn-dir) script-path nil 'clution--run-sentinel)))
 
 (defun clution--do-clean (systems)
   (dolist (system systems)

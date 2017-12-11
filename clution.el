@@ -99,24 +99,48 @@
   (getf clution-system :toplevel))
 
 (defun clution--spawn-lisp-command ()
-  (ecase clution-backend
-    (sbcl "sbcl")))
+  (ecase clution-frontend
+    (raw
+     (ecase clution-backend
+       (sbcl "sbcl")))
+    (roswell "ros")))
 
 (defun clution--spawn-lisp-args ()
-  (ecase clution-backend
-    (sbcl
-     '("--noinform" "--disable-ldb" "--lose-on-corruption" "--end-runtime-options"
-       "--noprint" "--disable-debugger" "--end-toplevel-options"))))
+  (ecase clution-frontend
+    (raw
+     (ecase clution-backend
+       (sbcl
+        '("--noinform" "--disable-ldb" "--lose-on-corruption" "--end-runtime-options"
+          "--noprint" "--disable-debugger" "--end-toplevel-options"))))
+    (roswell
+     (ecase clution-backend
+       (sbcl
+        '("run" "--lisp" "sbcl-bin" "--"
+          "--noinform" "--disable-ldb" "--lose-on-corruption" "--end-runtime-options"
+          "--noprint" "--disable-debugger" "--end-toplevel-options"))))))
 
 (defun clution--spawn-script-command ()
-  (ecase clution-backend
-    (sbcl "sbcl")))
+  (ecase clution-frontend
+    (raw
+     (ecase clution-backend
+       (sbcl "sbcl")))
+    (roswell "ros")))
 
-(defun clution--spawn-script-args (script-path)
-  (ecase clution-backend
-    (sbcl
-     `("--noinform" "--disable-ldb" "--lose-on-corruption" "--end-runtime-options"
-       "--noprint" "--disable-debugger" "--load" ,script-path "--eval" "(sb-ext:exit :code 0)"  "--end-toplevel-options"))))
+(defun clution--spawn-script-args (script-path script-args)
+  (ecase clution-frontend
+    (raw
+     (ecase clution-backend
+       (sbcl
+        `("--noinform" "--disable-ldb" "--lose-on-corruption" "--end-runtime-options"
+          "--noprint" "--disable-debugger" "--load" ,script-path "--eval" "(sb-ext:exit :code 0)"  "--end-toplevel-options"
+          ,@script-args))))
+    (roswell
+     (ecase clution-backend
+       (sbcl
+        `("run" "--lisp" "sbcl-bin" "--"
+          "--noinform" "--disable-ldb" "--lose-on-corruption" "--end-runtime-options"
+          "--noprint" "--disable-debugger" "--load" ,script-path "--eval" "(sb-ext:exit :code 0)"  "--end-toplevel-options"
+          ,@script-args))))))
 
 (defun clution--clution.system-name (system)
   (or (downcase (file-name-base (clution--system.path system)))))
@@ -393,10 +417,22 @@
 (defvar clution-run-complete-hook nil
   "Hook executed whenever a 'run' operation completes.")
 
+(defcustom clution-frontend 'raw
+  "The frontend to use as default for clution."
+  :type '(choice (const :tag "Use clution-backend directly" raw)
+                 (const :tag "Roswell" roswell))
+  :group 'clution)
+
 (defcustom clution-backend 'sbcl
   "The backend to use as default for clution."
-  :type '(choice (const :tag "sbcl" sbcl)
-                 (const :tag "roswell" roswell))
+  :type '(choice (const :tag "sbcl" sbcl))
+  :group 'clution)
+
+(defcustom clution-repl 'raw
+  "The type of repl to use for clution"
+  :type '(choice (const :tag "Use the backend's repl" raw)
+                 (const :tag "Use sly" slime)
+                 (const :tag "Use sly" sly))
   :group 'clution)
 
 (defvar clution-mode-map

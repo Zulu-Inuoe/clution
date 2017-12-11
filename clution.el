@@ -1,29 +1,5 @@
 (defvar *clution--current-clution* nil)
 (defvar *clution--current-op* nil)
-(defvar clution-build-complete-hook nil)
-
-(defcustom clution-backend 'sbcl
-  "The backend to use as default for clution."
-  :type '(choice (const :tag "sbcl" sbcl)
-                 (const :tag "roswell" roswell))
-  :group 'clution)
-
-(defvar clution-mode-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "C-S-b") 'clution-build)
-    (define-key map (kbd "<f5>") 'clution-run)
-    (define-key map (kbd "C-<f5>") 'clution-run-no-debug)
-    (define-key map (kbd "<f10>") 'clution-run-step)
-    map))
-
-(define-minor-mode clution-mode
-  "minor mode for editing a clution project."
-  t)
-
-(define-derived-mode clution-output-mode fundamental-mode
-  "clution-output"
-  "Mode for the clution output buffer"
-  (read-only-mode t))
 
 (defun clution--output-buffer ()
   (let ((buffer (get-buffer-create "*clution-output*")))
@@ -31,9 +7,6 @@
       (setf buffer-read-only t)
       (clution-output-mode))
     buffer))
-
-(add-to-list 'purpose-user-mode-purposes '(clution-output-mode . clution-output))
-(purpose-compile-user-configuration)
 
 (defun clution--setup-idle ()
   (clution--output-buffer)
@@ -391,6 +364,41 @@
 
         (delete-directory system-cache-dir t)))))
 
+(defun clution--find-file-hook ()
+  (let ((path (buffer-file-name)))
+    (when (and (null *clution--current-clution*)
+               (string-match-p "^clu$" (file-name-extension path)))
+      (clution-open path))))
+
+(defvar clution-build-complete-hook nil
+  "Hook executed whenever a 'build' operation completes.")
+
+(defvar clution-run-complete-hook nil
+  "Hook executed whenever a 'run' operation completes.")
+
+(defcustom clution-backend 'sbcl
+  "The backend to use as default for clution."
+  :type '(choice (const :tag "sbcl" sbcl)
+                 (const :tag "roswell" roswell))
+  :group 'clution)
+
+(defvar clution-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "C-S-b") 'clution-build)
+    (define-key map (kbd "<f5>") 'clution-run)
+    (define-key map (kbd "C-<f5>") 'clution-run-no-debug)
+    (define-key map (kbd "<f10>") 'clution-run-step)
+    map))
+
+(define-minor-mode clution-mode
+  "minor mode for editing a clution project."
+  t)
+
+(define-derived-mode clution-output-mode fundamental-mode
+  "clution-output"
+  "Mode for the clution output buffer"
+  (read-only-mode t))
+
 (defun clution-build ()
   (interactive)
 
@@ -447,10 +455,9 @@
   (interactive)
   (setf *clution--current-clution* nil))
 
-(defun clution--find-file-hook ()
-  (let ((path (buffer-file-name)))
-    (when (and (null *clution--current-clution*)
-               (string-match-p "^clu$" (file-name-extension path)))
-      (clution-open path))))
+(add-to-list 'purpose-user-mode-purposes '(clution-output-mode . clution-output))
+(purpose-compile-user-configuration)
 
 (add-hook 'find-file-hook 'clution--find-file-hook)
+
+(provide 'clution)

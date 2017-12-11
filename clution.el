@@ -223,7 +223,14 @@
 (defun clution--arglist-to-string (arglist)
   (with-temp-buffer
     (dolist (s arglist)
-      (insert " \"" (replace-regexp-in-string "\"" "\\\"" s) "\""))
+      (insert " ^\""
+              (replace-regexp-in-string
+               "\n" "^\n\n"
+               (replace-regexp-in-string
+                "\\((\\|)\\|%\\|!\\|\\^\\|\"\\|<\\|>\\|&\\||\\)"
+                "^\\1"
+                (replace-regexp-in-string "\"" "\\\\\"" s)))
+              "^\""))
     (buffer-string)))
 
 (defun clution--spawn-script (dir script-path sentinel)

@@ -1,8 +1,12 @@
 (defvar *clution--current-clution* nil)
 (defvar *clution--current-op* nil)
-(defvar *clution--lisp* 'sbcl)
-
 (defvar clution-build-complete-hook nil)
+
+(defcustom clution-backend 'sbcl
+  "The backend to use as default for clution."
+  :type '(choice (const :tag "sbcl" sbcl)
+                 (const :tag "roswell" roswell))
+  :group 'clution)
 
 (defvar clution-mode-map
   (let ((map (make-sparse-keymap)))
@@ -118,29 +122,25 @@
 (defun clution--system.name (clution-system)
   (file-name-base (clution--system.path clution-system)))
 
-(defun clution--system.type (clution-system)
-  (or (getf clution-system :type)
-      'library))
-
 (defun clution--system.toplevel (clution-system)
   (getf clution-system :toplevel))
 
 (defun clution--spawn-lisp-command ()
-  (ecase *clution--lisp*
+  (ecase clution-backend
     (sbcl "sbcl")))
 
 (defun clution--spawn-lisp-args ()
-  (ecase *clution--lisp*
+  (ecase clution-backend
     (sbcl
      '("--noinform" "--disable-ldb" "--lose-on-corruption" "--end-runtime-options"
        "--noprint" "--disable-debugger" "--end-toplevel-options"))))
 
 (defun clution--spawn-script-command ()
-  (ecase *clution--lisp*
+  (ecase clution-backend
     (sbcl "sbcl")))
 
 (defun clution--spawn-script-args (script-path)
-  (ecase *clution--lisp*
+  (ecase clution-backend
     (sbcl
      `("--noinform" "--disable-ldb" "--lose-on-corruption" "--end-runtime-options"
        "--noprint" "--disable-debugger" "--load" ,script-path "--eval" "(sb-ext:exit :code 0)"  "--end-toplevel-options"))))
@@ -198,12 +198,12 @@
          (clution-do)))))
 
 (defun clution--args-list-form ()
-  (case *clution--lisp*
+  (ecase clution-backend
     (sbcl
      'sb-ext:*posix-argv*)))
 
 (defun clution--exit-form (exit-code-form)
-  (case *clution--lisp*
+  (ecase clution-backend
     (sbcl
      `(sb-ext:exit :code ,exit-code-form))))
 
@@ -260,8 +260,10 @@
            "clution-spawn-script"
            nil
            (concat
-            "start "
+            "start"
+            " "
             (clution--spawn-script-command)
+            " "
             (clution--arglist-to-string
              (clution--spawn-script-args script-path))))))
     (set-process-sentinel proc sentinel)))

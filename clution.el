@@ -377,6 +377,20 @@
     (clution--append-output "Running script\n\n")
     (clution--spawn-script (clution--spawn-dir) script-path 'clution--run-sentinel)))
 
+(defun clution--do-clean (systems)
+  (dolist (system systems)
+    (let ((system-cache-dir (file-name-as-directory
+                             (concat
+                              (clution--clution.asdf-dir)
+                              (clution--system.name system)))))
+      (when (file-exists-p system-cache-dir)
+        (clution--append-output
+         "Removing '" (clution--system.name system)
+         "' asdf cache: '" system-cache-dir
+         "'\n\n")
+
+        (delete-directory system-cache-dir t)))))
+
 (defun clution-build ()
   (interactive)
 
@@ -399,7 +413,24 @@
     (message "clution: no clution open")
     nil)))
 
+(defun clution-clean ()
+  (interactive)
 
+  (cond
+   (*clution--current-clution*
+    (clution--clear-output)
+    (clution--append-output
+     "Clean starting: '" (clution--clution.name)
+     "'\n\n")
+
+    (clution--do-clean (clution--clution.systems))
+
+    (clution--append-output
+     "Clean complete: '" (clution--clution.name)
+     "'\n"))
+   (t
+    (message "clution: no clution open")
+    nil)))
 
 (defun clution-open (path)
   (interactive

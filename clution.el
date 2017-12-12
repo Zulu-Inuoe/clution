@@ -98,6 +98,9 @@
 (defun clution--system.toplevel (clution-system)
   (getf clution-system :toplevel))
 
+(defun clution--system.args (clution-system)
+  (getf clution-system :args))
+
 (defun clution--spawn-lisp-command ()
   (ecase clution-frontend
     (raw
@@ -389,7 +392,7 @@
      script-path)
 
     (clution--append-output "Running script\n\n")
-    (clution--spawn-script (clution--spawn-dir) script-path nil 'clution--run-sentinel)))
+    (clution--spawn-script (clution--spawn-dir) script-path (clution--system.args (clution--clution.selected-system)) 'clution--run-sentinel)))
 
 (defun clution--do-clean (systems)
   (dolist (system systems)

@@ -115,13 +115,13 @@
      (ecase clution-backend
        (sbcl
         '("--noinform" "--disable-ldb" "--lose-on-corruption" "--end-runtime-options"
-          "--noprint" "--disable-debugger" "--end-toplevel-options"))))
+          "--noprint" "--disable-debugger"))))
     (roswell
      (ecase clution-backend
        (sbcl
         '("run" "--lisp" "sbcl-bin" "--"
           "--noinform" "--disable-ldb" "--lose-on-corruption" "--end-runtime-options"
-          "--noprint" "--disable-debugger" "--end-toplevel-options"))))))
+          "--noprint" "--disable-debugger"))))))
 
 (defun clution--spawn-script-command ()
   (ecase clution-frontend
@@ -160,7 +160,7 @@
        (sbcl '())))
     (roswell
      (ecase clution-backend
-       (sbcl '("run" "-L" "sbcl-bin"))))))
+       (sbcl '("run" "--lisp" "sbcl-bin"))))))
 
 (defun clution--clution.system-name (system)
   (or (downcase (file-name-base (clution--system.path system)))))
@@ -305,9 +305,6 @@
              (clution--spawn-script-args script-path script-args))))))
     (set-process-sentinel proc sentinel)))
 
-(defun clution--eval-in-proc (proc sexpr)
-  (process-send-string proc (format "%S\n" sexpr)))
-
 (defun clution--clear-output ()
   (with-current-buffer (clution--output-buffer)
     (let ((inhibit-read-only t))
@@ -335,7 +332,8 @@
        (clution--append-output "\n" (clution--system.name system) ": ")
        (if (zerop status)
            (clution--append-output "build completed successfully\n\n")
-         (clution--append-output "error during build: process exited with code '" (number-to-string status) "'\n\n")))
+         (clution--append-output "error during build: process exited with code '"
+                                 (number-to-string status) "'\n\n")))
 
      (pop *clution--build-remaining-systems*)
 
@@ -353,7 +351,8 @@
                        (clution--spawn-dir)
                        'clution--build-filter
                        'clution--build-sentinel)))
-      (clution--eval-in-proc build-proc (clution--build-form system nil)))))
+      (process-send-string build-proc
+                           (format "%S\n" (clution--build-form system nil))))))
 
 (defun clution--kickoff-build (systems)
   (when *clution--current-op*
@@ -558,7 +557,8 @@
 (defun clution--find-file-hook ()
   (let ((path (buffer-file-name)))
     (when (and (null *clution--current-clution*)
-               (string-match-p "^clu$" (file-name-extension path)))
+               (string-match-p "^clu$" (file-name-extension path))
+               (file-exists-p path))
       (clution-open path))))
 
 (defvar clution-build-complete-hook nil
@@ -567,7 +567,7 @@
 (defvar clution-run-complete-hook nil
   "Hook executed whenever a 'run' operation completes.")
 
-(defcustom clution-frontend 'raw
+(defcustom clution-frontend 'roswell
   "The frontend to use as default for clution."
   :type '(choice (const :tag "Use clution-backend directly" raw)
                  (const :tag "Roswell" roswell))

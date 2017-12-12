@@ -1,4 +1,5 @@
 (defvar *clution--current-clution* nil)
+(defvar *clution--repl-proc* nil)
 (defvar *clution--current-op* nil)
 
 (defun clution--output-buffer ()
@@ -145,6 +146,22 @@
           "--noprint" "--disable-debugger" "--load" ,script-path "--eval" "(sb-ext:exit :code 0)"  "--end-toplevel-options"
           ,@script-args))))))
 
+(defun clution--spawn-repl-command ()
+  (ecase clution-frontend
+    (raw
+     (ecase clution-backend
+       (sbcl "sbcl")))
+    (roswell "ros")))
+
+(defun clution--spawn-repl-args ()
+  (ecase clution-frontend
+    (raw
+     (ecase clution-backend
+       (sbcl '())))
+    (roswell
+     (ecase clution-backend
+       (sbcl '("run" "-L" "sbcl-bin"))))))
+
 (defun clution--clution.system-name (system)
   (or (downcase (file-name-base (clution--system.path system)))))
 
@@ -218,8 +235,8 @@
      ,(clution--exit-form 0)))
 
 (defun clution--run-form (system)
-  (let ((toplevel (clution--system.toplevel system))
-        (system-name (clution--system.name system)))
+  (let ((system-name (clution--system.name system))
+        (toplevel (clution--system.toplevel system)))
     (clution--with-system-searcher
      `(progn
         (let ((*standard-output* (make-broadcast-stream))
@@ -230,6 +247,19 @@
           (if (integerp ret-code)
               ,(clution--exit-form 'ret-code)
             ,(clution--exit-form 0)))))))
+
+(defun clution--run-repl-init-form (system)
+  (let ((system-name (clution--system.name system)))
+    (clution--with-system-searcher
+     `(progn
+        (let ((*standard-output* (make-broadcast-stream))
+              (*trace-output* (make-broadcast-stream)))
+          (asdf:load-system ,system-name :verbose nil))))))
+
+(defun clution--run-repl-run-form (system)
+  (let ((toplevel (clution--system.toplevel system))
+        (args (clution--system.args system)))
+    `(apply (read-from-string ,toplevel) ',args)))
 
 (defun clution--spawn-dir ()
   (file-name-directory (clution--clution.path)))
@@ -394,6 +424,25 @@
     (clution--append-output "Running script\n\n")
     (clution--spawn-script (clution--spawn-dir) script-path (clution--system.args (clution--clution.selected-system)) 'clution--run-sentinel)))
 
+(defun clution--sly-on-mrepl ())
+
+(defun clution--run-repl-on-build-complete ()
+  (remove-hook 'clution-build-complete-hook 'clution--run-repl-on-build-complete)
+
+  (unless (clution--system.toplevel (clution--clution.selected-system))
+    (error "Cannot run '%S', no toplevel defined" (clution--system.name (clution--clution.selected-system))))
+
+  (setf *clution--current-op*
+        (list
+         :type 'clution-run-repl
+         :toplevel (clution--system.toplevel (clution--clution.selected-system))))
+
+  (clution--append-output
+   "Running repl: '" (clution--clution.name)
+   "' selected system: '" (clution--system.name (clution--clution.selected-system))
+   "' toplevel: '" (clution--system.toplevel (clution--clution.selected-system))
+   "'\n\n"))
+
 (defun clution--do-clean (systems)
   (dolist (system systems)
     (let ((system-cache-dir (file-name-as-directory
@@ -407,6 +456,104 @@
          "'\n\n")
 
         (delete-directory system-cache-dir t)))))
+
+(defun clution--start-repl (&optional setup-form init-form)
+  (clution--append-output
+   "\nClution REPL starting with style '" (format "%s" clution-repl-style) "'\n")
+  (setf *clution--repl-proc*
+        (ecase clution-repl-style
+          (raw
+           (let* ((default-directory (clution--spawn-dir))
+                  (proc
+                   (start-process-shell-command
+                    "clution-repl"
+                    nil
+                    (concat
+                     "start"
+                     " "
+                     (clution--spawn-repl-command)
+                     " "
+                     (clution--arglist-to-string (clution--spawn-repl-args))))))
+             (set-process-sentinel
+              proc
+              (lambda (proc event)
+                (case (process-status proc)
+                  (exit
+                   (clution--repl-exited)))))
+             proc))
+          (comint
+           (let* ((comint-buf (apply
+                               #'make-comint
+                               "clution-repl"
+                               (clution--spawn-repl-command)
+                               nil
+                               (clution--spawn-repl-args)))
+                  (proc (get-buffer-process comint-buf)))
+             (set-process-sentinel
+              proc
+              (lambda (proc event)
+                (case (process-status proc)
+                  (exit
+                   (clution--repl-exited)))))
+             proc))
+          (inferior-lisp
+           (let* ((inf-buffer
+                   (save-window-excursion
+                     (inferior-lisp
+                      (concat
+                       (clution--spawn-repl-command) " "
+                       (mapconcat #'identity (clution--spawn-repl-args) " ")))))
+                  (proc (get-buffer-process inf-buffer)))
+             (set-process-sentinel
+              proc
+              (lambda (proc event)
+                (case (process-status proc)
+                  (exit
+                   (clution--repl-exited)))))
+             proc))
+          (sly
+           (lexical-let (net-close-hook)
+             (setf net-close-hook
+                   (lambda (proc)
+                     (remove-hook 'sly-net-process-close-hooks net-close-hook)
+                     (clution--repl-exited)))
+             (add-hook 'sly-net-process-close-hooks net-close-hook))
+
+           (when init-form
+             (lexical-let ((init-form init-form)
+                           mrepl-hook)
+               (setf mrepl-hook
+                     (lambda ()
+                       (remove-hook 'sly-mrepl-hook mrepl-hook)
+                       (with-current-buffer (sly-mrepl)
+                         (goto-char (sly-mrepl--mark))
+                         (delete-region (point) (point-max))
+                         (insert (format "%S" init-form))
+                         (sly-mrepl-return)
+                         (when-let ((window (get-buffer-window)))
+                           (set-window-point window (point))))))
+               (add-hook 'sly-mrepl-hook mrepl-hook)))
+           (sly-start
+            :program (clution--spawn-repl-command)
+            :program-args (clution--spawn-repl-args)
+            :directory (clution--spawn-dir)
+            :init (if setup-form
+                      (lambda (port-filename coding-system)
+                        (format "(progn %s %S)\n\n"
+                                (funcall sly-init-function port-filename coding-system)
+                                setup-form))
+                    sly-init-function)))))
+
+  )
+
+(defun clution--repl-sentinel (proc event)
+  (case (process-status proc)
+    (exit
+     (clution--repl-exited))))
+
+(defun clution--repl-exited ()
+  (clution--append-output "\nclution-repl: repl exited\n")
+  (setf *clution--repl-proc* nil))
 
 (defun clution--find-file-hook ()
   (let ((path (buffer-file-name)))
@@ -431,9 +578,11 @@
   :type '(choice (const :tag "sbcl" sbcl))
   :group 'clution)
 
-(defcustom clution-repl 'raw
+(defcustom clution-repl-style 'raw
   "The type of repl to use for clution"
   :type '(choice (const :tag "Use the backend's repl" raw)
+                 (const :tag "Use the backend's repl in a comint buffer" comint)
+                 (const :tag "Use the inferior-lisp system" inferior-lisp)
                  (const :tag "Use sly" slime)
                  (const :tag "Use sly" sly))
   :group 'clution)
@@ -454,6 +603,19 @@
   "clution-output"
   "Mode for the clution output buffer"
   (read-only-mode t))
+
+(defun clution-repl ()
+  (interactive)
+
+  (cond
+   (*clution--current-op*
+    (message "clution: busy doing op: '%s'" (getf *clution--current-op* :type)))
+   (*clution--repl-proc*
+    (message "clution: repl already active"))
+   (*clution--current-clution*
+    (clution--start-repl))
+   (t
+    (message "clution: no clution open"))))
 
 (defun clution-build ()
   (interactive)
@@ -476,6 +638,19 @@
    (*clution--current-clution*
     (clution--clear-output)
     (add-hook 'clution-build-complete-hook 'clution--run-on-build-complete)
+    (clution--kickoff-build (list (clution--clution.selected-system))))
+   (t
+    (message "clution: no clution open"))))
+
+(defun clution-run-repl ()
+  (interactive)
+
+  (cond
+   (*clution--current-op*
+    (message "clution: busy doing op: '%s'" (getf *clution--current-op* :type)))
+   (*clution--current-clution*
+    (clution--clear-output)
+    (add-hook 'clution-build-complete-hook 'clution--run-repl-on-build-complete)
     (clution--kickoff-build (list (clution--clution.selected-system))))
    (t
     (message "clution: no clution open"))))

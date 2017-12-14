@@ -9,19 +9,6 @@
       (clution-output-mode))
     buffer))
 
-(defun clution--setup-idle ()
-  (clution--output-buffer)
-  (purpose-load-window-layout "clution-idle")
-  (when-let ((out-window (get-buffer-window (clution--output-buffer))))
-    (set-window-parameter out-window 'no-other-window t)))
-
-(defun clution--setup-running ()
-  (clution--output-buffer)
-  (sly-start )
-  (purpose-load-window-layout "clution-running")
-  (when-let ((out-window (get-buffer-window (clution--output-buffer))))
-    (set-window-parameter out-window 'no-other-window t)))
-
 (defun clution--parse-string (str)
   (car (read-from-string str)))
 
@@ -561,6 +548,13 @@
                (file-exists-p path))
       (clution-open path))))
 
+
+(defvar clution-open-hook nil
+  "Hook executed whenever a clution is opened.")
+
+(defvar clution-close-hook nil
+  "Hook executed whenever a clution is closed.")
+
 (defvar clution-build-complete-hook nil
   "Hook executed whenever a 'build' operation completes.")
 
@@ -680,16 +674,21 @@
   (interactive
    (list (read-file-name "clution to open: " nil nil t)))
 
+  (when *clution--current-clution*
+    (clution-clode))
+
   (let ((path (expand-file-name path)))
     (setf *clution--current-clution*
           (cons (clution--parse-file path)
                 path)))
-
-  (clution--setup-idle))
+  (run-hooks 'clution-open-hook))
 
 (defun clution-close ()
   (interactive)
-  (setf *clution--current-clution* nil))
+  (when *clution--current-clution*
+    (setf *clution--current-clution* nil)
+
+    (run-hooks 'clution-close-hook)))
 
 (add-to-list 'purpose-user-mode-purposes '(clution-output-mode . clution-output))
 (purpose-compile-user-configuration)

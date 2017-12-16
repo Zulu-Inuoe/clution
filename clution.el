@@ -1,3 +1,94 @@
+(require 'cl-lib)
+
+(define-derived-mode clution-dired-mode special-mode "ClutionDired"
+  "A major mode for displaying the directory tree in a clution."
+  (setq indent-tabs-mode nil
+        buffer-read-only t
+        truncate-lines -1))
+
+(defun clution--dired-buffer ()
+  (let ((buffer (get-buffer-create "*clution-dired*")))
+    (with-current-buffer buffer
+      (clution-dired-mode))
+    buffer))
+
+(defun clution--eval-in-lisp (sexpr)
+  (lexical-let* ((latch-buffer (generate-new-buffer "*temp*"))
+                 (latch (start-process "latch" latch-buffer nil))
+                 (lisp-proc nil)
+                 (output ""))
+    (flet ((filter (proc string)
+                   (setf output (concat output string)))
+           (sentinel (proc event)
+                     (case (process-status proc)
+                       (exit
+                        (message "Status of latch: %S" (process-status latch))
+                        (process-send-string latch "\n")))))
+      (unwind-protect
+          (progn
+            (setf
+             lisp-proc
+             (make-process
+              :name "clution--system-query"
+              :command (list* (clution--spawn-lisp-command) (clution--spawn-lisp-args))
+              :filter #'filter
+              :sentinel #'sentinel))
+            (process-send-string lisp-proc (format "%S\n" sexpr))
+            (process-send-string lisp-proc (format "%S\n" (clution--exit-form 0)))
+            (accept-process-output latch)
+            output)
+        (ignore-errors
+          (when lisp-proc
+            (delete-process lisp-proc)))
+        (ignore-errors
+          (delete-process latch))
+        (kill-buffer latch-buffer)))))
+
+(clution--eval-in-lisp '1)
+
+(defun clution--system-query-system (system)
+  (lexical-let ((latch (start-process "latch" nil nil))
+                (output ""))
+    (flet ((filter (proc string)
+                   (setf output (concat output string)))
+           (sentinel (proc event)
+                     (case (process-status proc)
+                       (exit
+                        (process-send-string latch "\n")))))
+      (unwind-protect
+          (progn
+            (let ((default-directory (clution--clution.dir clution)))
+              (make-process
+               :name "clution--system-query"
+               :command (list* (clution--spawn-lisp-command) (clution--spawn-lisp-args))
+               :filter #'filter
+               :sentinel #'sentinel)
+              (accept-process-output latch)
+              output))
+        (ignore-errors
+          (delete-process latch))))))
+
+(defun clution--dired-system-open (button)
+  (clution--system-query-files
+   (overlay-get button 'clution--dired-item-system)))
+
+(defun clution--dired-system-close (button)
+  )
+
+(defun clution--dired-system-toggle (button)
+  (if (overlay-get button 'clution--dired-item-open)
+      (clution--dired-system-close button)
+    (clution--dired-system-open button)))
+
+(defun clution--populate-dired (clution buffer)
+  (with-current-buffer buffer
+    (dolist (system (clution--clution.systems clution))
+      (insert-button
+       (clution--system.name system)
+       'action 'clution--dired-system-toggle
+       'clution--dired-item-system system
+       'clution--dired-item-open nil))))
+
 (defvar *clution--current-clution* nil)
 (defvar *clution--current-watch* nil)
 (defvar *clution--repl-active* nil)
@@ -6,7 +97,6 @@
 (defun clution--output-buffer ()
   (let ((buffer (get-buffer-create "*clution-output*")))
     (with-current-buffer buffer
-      (setf buffer-read-only t)
       (clution-output-mode))
     buffer))
 
@@ -387,7 +477,7 @@
   (dolist (system systems)
     (clution--append-output "  " (clution--system.name system) "\n"))
   (clution--append-output "\n")
-
+(neotree)
   (setf *clution--current-op*
         (list
          :type 'clution-build
@@ -614,7 +704,8 @@
 (define-derived-mode clution-output-mode compilation-mode
   "clution-output"
   "Mode for the clution output buffer"
-  (read-only-mode t))
+  (setq buffer-read-only t
+        truncate-lines -1))
 
 (defun clution-repl ()
   (interactive)

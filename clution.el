@@ -222,24 +222,24 @@
                 (clution--system.name system)))
               "**/*.*")))
           (clution--clution.systems clution))))
-    `(flet ((clution-system-searcher (system-name)
-                                     (loop :for (name . path) :in ',names-paths-alist
-                                           :if (string-equal system-name name)
-                                           :return (parse-namestring path)))
+    `(cl:flet ((clution-system-searcher (system-name)
+                                     (cl:loop :for (name . path) :in ',names-paths-alist
+                                           :if (cl:string-equal system-name name)
+                                           :return (cl:parse-namestring path)))
             (clution-do ()
                         ,lispexpr))
-       (let* ((asdf:*system-definition-search-functions*
-               (list* (function clution-system-searcher)
+       (cl:let* ((asdf:*system-definition-search-functions*
+               (cl:list* (cl:function clution-system-searcher)
                       asdf:*system-definition-search-functions*))
               (asdf:*output-translations-parameter* asdf:*output-translations-parameter*))
          (asdf:initialize-output-translations
-          (append
-           (list*
+          (cl:append
+           (cl:list*
             :output-translations
             :inherit-configuration
-            (mapcar
-             (lambda (mapping)
-               (mapcar #'parse-namestring mapping))
+            (cl:mapcar
+             (cl:lambda (mapping)
+               (cl:mapcar (cl:function cl:parse-namestring) mapping))
              ',system-output-translations))
            asdf:*output-translations-parameter*))
          (clution-do)))))
@@ -383,9 +383,6 @@
                            (format "%S\n" (clution--build-form system nil))))))
 
 (defun clution--kickoff-build (systems)
-  (when *clution--current-op*
-    (error "Already running clution operation '%S'" *clution--current-op*))
-
   (clution--append-output "Building systems:\n")
   (dolist (system systems)
     (clution--append-output "  " (clution--system.name system) "\n"))
@@ -398,6 +395,47 @@
   (setf *clution--build-remaining-systems* systems)
 
   (clution--continue-build))
+
+(defun clution--repl-sly-compile (systems)
+  (let* ((clution (clution--system.clution (car systems)))
+         (system-names (mapcar 'clution--system.name systems)))
+    (sly-eval-async
+        `(cl:progn
+          ,(clution--with-system-searcher clution
+                                          `(slynk::collect-notes
+                                            (cl:lambda ()
+                                                       (cl:dolist (system-name ',system-names)
+                                                                  (cl:handler-case
+                                                                   (slynk::with-compilation-hooks ()
+                                                                                                  (asdf:compile-system system-name :force t))
+                                                                   (asdf:compile-error ()
+                                                                                       nil)
+                                                                   (asdf/lisp-build:compile-file-error ()
+                                                                                                       nil)))))))
+
+      (lexical-let ((clution clution))
+        (lambda (result)
+          (let ((default-directory (clution--clution.dir clution)))
+            (sly-compilation-finished result nil)
+            (clution--append-output (with-current-buffer (sly-buffer-name :compilation) (buffer-string)))
+            (clution--build-complete))))
+      "COMMON-LISP-USER")))
+
+(defun clution--kickoff-build-in-repl (systems)
+  (clution--append-output "Building systems:\n")
+  (dolist (system systems)
+    (clution--append-output "  " (clution--system.name system) "\n"))
+  (clution--append-output "\n")
+
+  (setf *clution--current-op*
+        (list
+         :type 'clution-build-in-repl
+         :build-systems systems))
+
+  (let ((system-names (mapcar 'clution--system.name systems)))
+    (ecase clution-repl-style
+      (sly
+       (clution--repl-sly-compile systems)))))
 
 (defun clution--build-complete ()
   (clution--append-output
@@ -489,7 +527,7 @@
                       (funcall sly-init-function port-filename coding-system)
                       (clution--repl-form *clution--current-clution*))))
 
-     (setf *clution--repl-active* (sly-inferior-process)))))
+     (setf *clution--repl-active* t))))
 
 (defun clution--repl-sentinel (proc event)
   (case (process-status proc)
@@ -573,7 +611,7 @@
   "clution-file"
   "Major mode for editing a clution project file.")
 
-(define-derived-mode clution-output-mode fundamental-mode
+(define-derived-mode clution-output-mode compilation-mode
   "clution-output"
   "Mode for the clution output buffer"
   (read-only-mode t))
@@ -606,7 +644,11 @@
     (clution--append-output
      "Build starting: '" (clution--clution.name *clution--current-clution*)
      "'\n\n")
-    (clution--kickoff-build (clution--clution.systems)))
+    (cond
+     (*clution--repl-active*
+      (clution--kickoff-build-in-repl (clution--clution.systems)))
+     (t
+      (clution--kickoff-build (clution--clution.systems)))))
    (t
     (message "clution: no clution open"))))
 
@@ -658,7 +700,10 @@
     (setf *clution--current-clution*
           (clution--parse-file path))
     (setf *clution--current-watch*
-          (file-notify-add-watch path '(change) 'clution--file-watch-callback)))
+          (file-notify-add-watch path '(change) 'clution--file-watch-callback))
+
+    (with-current-buffer (clution--output-buffer)
+      (setf default-directory (clution--clution.dir *clution--current-clution*))))
   (run-hooks 'clution-open-hook))
 
 (defun clution-close ()

@@ -39,14 +39,35 @@
       (when lisp-proc
         (delete-process lisp-proc)))))
 
-(defun clution--dired-system-open (button)
-  (clution--system-query-files
-   (overlay-get button 'clution--dired-item-system)))
+(defun clution--systems-query (systems)
+  (let ((names-paths-alist
+         (mapcar
+          (lambda (system)
+            (cons
+             (clution--system.name system)
+             (clution--system.path system)))
+          systems)))
+    (clution--eval-in-lisp
+     `(cl:labels ((translate-component (component type)
+                                       (cl:list
+                                        :name (asdf:component-name component)
+                                        :path (cl:namestring (asdf:component-pathname component))
+                                        :type type))
+                  (recurse (component)
+                           (cl:etypecase component
+                                         (asdf:parent-component
+                                          (cl:cons
+                                           (translate-component component :parent)
+                                           (cl:mapcar #'recurse (asdf:component-children component))))
+                                         (asdf:child-component
+                                          (cons (translate-component component :child) nil)))))
+                 (cl:loop
+                  :for (name . path) :in ',names-paths-alist
+                  :do (asdf:load-asd path)
+                  :collect (recurse (asdf:find-system name)))))))
 
-(defun clution--dired-system-toggle (button)
-  (if (overlay-get button 'clution--dired-item-open)
-      (clution--dired-system-close button)
-    (clution--dired-system-open button)))
+(defun clution--system-query (system)
+  (car (clution--systems-query (list system))))
 
 (defun clution--populate-dired (clution buffer)
   (with-current-buffer buffer
@@ -69,49 +90,90 @@
     buffer))
 
 (defun clution--parse-string (str)
-  (let ((clution (cons (car (read-from-string str)) nil)))
+  (car (read-from-string str)))
 
-    (setf (getf (car clution) :systems)
+(defun clution--update-system-query (system)
+  (when-let ((query (ignore-errors (clution--system-query system))))
+    (setf (getf system :system-query) query)))
+
+(defun clution--make-system (data &optional clution)
+  (unless (getf data :path)
+    (error "clution: system missing :path component: %S" data))
+  (list
+   :path
+   (expand-file-name
+    (getf data :path)
+    (when clution (clution--clution.dir clution)))
+   :clution clution
+   :toplevel (getf data :toplevel)
+   :startup-dir
+   (when-let ((dir (getf data :startup-dir)))
+     (file-name-as-directory
+      (expand-file-name
+       (getf data :startup-dir)
+       (when clution (clution--clution.dir clution)))))
+   :args (getf data :args)
+   :system-query nil))
+
+(defun clution--make-clution (data &optional path)
+  (let ((res
+         (list
+          :name (getf data :name)
+          :path path
+          :systems nil
+          :selected-system (getf data :selected-system)
+          :output-dir
+          (when-let ((dir (getf data :output-dir)))
+            (file-name-as-directory dir))
+          :tmp-dir
+          (when-let ((dir (getf data :tmp-dir)))
+            (file-name-as-directory dir)))))
+
+    (setf (getf res :systems)
           (mapcar
-           (lambda (sys)
-             (cons sys clution))
-           (getf (car clution) :systems)))
+           (lambda (sys-data)
+             (clution--make-system sys-data res))
+           (getf data :systems)))
 
-    clution))
+    (let ((queries (clution--systems-query (clution--clution.systems res))))
+      (dolist (sys (clution--clution.systems res))
+        (setf (getf sys :system-query) (car queries))
+        (pop queries)))
+
+    res))
 
 (defun clution--parse-file (path)
-  (let ((ret
-         (clution--parse-string
+  (clution--make-clution
+   (clution--parse-string
           (with-temp-buffer
             (insert-file-contents path)
-            (buffer-string)))))
-    (setf (cdr ret) path)
-    ret))
+            (buffer-string)))
+   path))
 
 (defun clution--clution.name (&optional clution)
   (unless clution
     (setf clution *clution--current-clution*))
 
-  (getf (car clution) :name))
+  (getf clution :name))
 
 (defun clution--clution.path (&optional clution)
   (unless clution
     (setf clution *clution--current-clution*))
 
-  (cdr clution))
+  (getf clution :path))
 
 (defun clution--clution.systems (&optional clution)
   (unless clution
     (setf clution *clution--current-clution*))
 
-  (getf (car clution) :systems))
+  (getf clution :systems))
 
 (defun clution--clution.selected-system (&optional clution)
   (unless clution
     (setf clution *clution--current-clution*))
 
   (find
-   (or (getf (car clution) :selected-system)
+   (or (getf clution :selected-system)
        (let ((sys (first (clution--clution.systems clution))))
          (if sys (clution--system.name sys) nil)))
    (clution--clution.systems clution)
@@ -122,39 +184,39 @@
   (unless clution
     (setf clution *clution--current-clution*))
 
-  (file-name-as-directory
-   (or (getf (car clution) :output-dir)
-       (concat
-        (file-name-as-directory (file-name-directory (clution--clution.path clution)))
-        "out"))))
+  (or (getf clution :output-dir)
+      (file-name-as-directory
+       (expand-file-name
+        "out"
+        (clution--clution.dir clution)))))
 
 (defun clution--clution.tmp-dir (&optional clution)
   (unless clution
     (setf clution *clution--current-clution*))
 
-  (file-name-as-directory
-   (or (getf (car clution) :tmp-dir)
-       (concat
-        (file-name-as-directory (file-name-directory (clution--clution.path clution)))
-        "tmp"))))
+  (or (getf clution :tmp-dir)
+      (file-name-as-directory
+       (expand-file-name
+        "tmp"
+        (clution--clution.dir clution)))))
 
 (defun clution--clution.script-dir (&optional clution)
   (unless clution
     (setf clution *clution--current-clution*))
 
   (file-name-as-directory
-   (concat
-    (clution--clution.tmp-dir clution)
-    "script")))
+   (expand-file-name
+    "script"
+    (clution--clution.tmp-dir clution))))
 
 (defun clution--clution.asdf-dir (&optional clution)
   (unless clution
     (setf clution *clution--current-clution*))
 
   (file-name-as-directory
-   (concat
-    (clution--clution.tmp-dir clution)
-    "asdf")))
+   (exand-file-name
+    "asdf"
+    (clution--clution.tmp-dir clution))))
 
 (defun clution--clution.dir (&optional clution)
   (unless clution
@@ -162,25 +224,38 @@
   (file-name-directory (clution--clution.path clution)))
 
 (defun clution--system.path (clution-system)
-  (getf (car clution-system) :path))
+  (getf clution-system :path))
+
+(defun clution--system.dir (clution-system)
+  (file-name-directory (clution--system.path clution-system)))
+
+(defun clution--system.query (clution-system)
+  (getf clution-system :system-query))
+
+(defun clution--system.children (clution-system)
+  (cdr (clution--system.query clution-system)))
+
+(defun clution--system.query-prop (clution-system prop)
+  (getf (car (clution--system.query clution-system)) prop))
 
 (defun clution--system.name (clution-system)
-  (downcase (file-name-base (clution--system.path clution-system))))
+  (or (clution--system.query-prop clution-system :NAME)
+      (downcase (file-name-base (clution--system.path clution-system)))))
 
 (defun clution--system.clution (clution-system)
-  (cdr clution-system))
+  (getf clution-system :clution))
 
 (defun clution--system.toplevel (clution-system)
-  (getf (car clution-system) :toplevel))
+  (getf clution-system :toplevel))
 
 (defun clution--system.startup-dir (clution-system)
-  (if-let ((dir (getf (car clution-system) :startup-dir)))
-      (file-name-as-directory
-       (expand-file-name dir (clution--clution.path (clution--system.clution clution-system))))
-    (clution--clution.dir (clution--system.clution clution-system))))
+  (or (getf clution-system :startup-dir)
+      (and (clution--system.clution clution-system)
+           (clution--clution.dir (clution--system.clution clution-system)))
+      (clution--system.dir clution-system)))
 
 (defun clution--system.args (clution-system)
-  (getf (car clution-system) :args))
+  (getf clution-system :args))
 
 (defun clution--system.script-path (clution-system)
   (concat
@@ -259,26 +334,21 @@
           (lambda (system)
             (cons
              (clution--system.name system)
-             (expand-file-name
-              (clution--system.path system)
-              (file-name-directory (clution--clution.path clution)))))
+             (clution--system.path system)))
           (clution--clution.systems clution)))
         (system-output-translations
          (mapcar
           (lambda (system)
             (list
-             (concat
-              (file-name-directory
-               (expand-file-name
-                (clution--system.path system)
-                (file-name-directory (clution--clution.path clution))))
-              "**/*.*")
-             (concat
+             (expand-file-name
+              "**/*.*"
+              (clution--system.dir system))
+             (expand-file-name
+              "**/*.*"
               (file-name-as-directory
-               (concat
-                (clution--clution.asdf-dir clution)
-                (clution--system.name system)))
-              "**/*.*")))
+               (expand-file-name
+                (clution--system.name system)
+                (clution--clution.asdf-dir clution))))))
           (clution--clution.systems clution))))
     `(cl:flet ((clution-system-searcher (system-name)
                                      (cl:loop :for (name . path) :in ',names-paths-alist
@@ -445,7 +515,7 @@
   (dolist (system systems)
     (clution--append-output "  " (clution--system.name system) "\n"))
   (clution--append-output "\n")
-(neotree)
+
   (setf *clution--current-op*
         (list
          :type 'clution-build

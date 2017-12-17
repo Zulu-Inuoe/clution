@@ -932,12 +932,13 @@ _ALIST is ignored."
 
 (defun clution--set-window-width (window n)
   "Make WINDOW N columns width."
-  (let ((w (max n window-min-width)))
-    (unless (null window)
-      (if (> (window-width) w)
-          (shrink-window-horizontally (- (window-width) w))
-        (if (< (window-width) w)
-            (enlarge-window-horizontally (- w (window-width))))))))
+  (with-selected-window window
+    (let ((w (max n window-min-width)))
+      (unless (null window)
+        (if (> (window-width) w)
+            (shrink-window-horizontally (- (window-width) w))
+          (if (< (window-width) w)
+              (enlarge-window-horizontally (- w (window-width)))))))))
 
 (defun clution--kill-buffer-if-no-window (buffer-or-name)
   (when-let ((buffer (get-buffer buffer-or-name)))
@@ -951,9 +952,9 @@ _ALIST is ignored."
       (erase-buffer)
       (clution--populate-clutex *clution--current-clution* (current-buffer)))))
 
-(defun clution--init-clutex-window (window clution)
+(defun clution--init-clutex-window (window)
   (set-window-dedicated-p window t)
-  (clution--set-window-width clution clution-clutex-width))
+  (clution--set-window-width window clution-clutex-width))
 
 (defun clution-open-clutex ()
   (interactive)
@@ -963,6 +964,13 @@ _ALIST is ignored."
            (clution--clutex-buffer)
            'clution-clutex-default-display-fn))
     (clution--init-clutex-window *clution--clutex-window*)))
+
+(defun clution-close-clutex ()
+  (interactive)
+  (when (window-live-p *clution--clutex-window*)
+    (delete-window *clution--clutex-window*)
+    (kill-buffer-if-not-modified "*clution-clutex*")
+    (setf *clution--clutex-window* nil)))
 
 (add-to-list 'auto-mode-alist '("\\.clu$" . clution-file-mode))
 (add-hook 'find-file-hook 'clution--find-file-hook)

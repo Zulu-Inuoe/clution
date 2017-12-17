@@ -13,67 +13,35 @@
     buffer))
 
 (defun clution--eval-in-lisp (sexpr)
-  (lexical-let* ((latch-buffer (generate-new-buffer "*temp*"))
-                 (latch (start-process "latch" latch-buffer nil))
-                 (lisp-proc nil)
+  (lexical-let* ((lisp-proc nil)
                  (output ""))
-    (flet ((filter (proc string)
-                   (setf output (concat output string)))
-           (sentinel (proc event)
-                     (case (process-status proc)
-                       (exit
-                        (message "Status of latch: %S" (process-status latch))
-                        (process-send-string latch "\n")))))
-      (unwind-protect
-          (progn
-            (setf
-             lisp-proc
-             (make-process
-              :name "clution--system-query"
-              :command (list* (clution--spawn-lisp-command) (clution--spawn-lisp-args))
-              :filter #'filter
-              :sentinel #'sentinel))
-            (process-send-string lisp-proc (format "%S\n" sexpr))
-            (process-send-string lisp-proc (format "%S\n" (clution--exit-form 0)))
-            (accept-process-output latch)
-            output)
-        (ignore-errors
-          (when lisp-proc
-            (delete-process lisp-proc)))
-        (ignore-errors
-          (delete-process latch))
-        (kill-buffer latch-buffer)))))
-
-(clution--eval-in-lisp '1)
-
-(defun clution--system-query-system (system)
-  (lexical-let ((latch (start-process "latch" nil nil))
-                (output ""))
-    (flet ((filter (proc string)
-                   (setf output (concat output string)))
-           (sentinel (proc event)
-                     (case (process-status proc)
-                       (exit
-                        (process-send-string latch "\n")))))
-      (unwind-protect
-          (progn
-            (let ((default-directory (clution--clution.dir clution)))
-              (make-process
-               :name "clution--system-query"
-               :command (list* (clution--spawn-lisp-command) (clution--spawn-lisp-args))
-               :filter #'filter
-               :sentinel #'sentinel)
-              (accept-process-output latch)
-              output))
-        (ignore-errors
-          (delete-process latch))))))
+    (unwind-protect
+        (progn
+          (setf
+           lisp-proc
+           (make-process
+            :name "*clution-lisp-eval*"
+            :command (list* (clution--spawn-lisp-command) (clution--spawn-lisp-args))
+            :filter
+            (lambda (proc string)
+              (setf output (concat output string)))))
+          (process-send-string
+           lisp-proc
+           (format "%S\n"
+                   `(cl:progn
+                     (cl:prin1
+                      (cl:let ((cl:*standard-output* (cl:make-broadcast-stream)))
+                              ,sexpr))
+                     ,(clution--exit-form 0))))
+          (while (process-live-p lisp-proc)
+            (accept-process-output lisp-proc))
+          (car (read-from-string output)))
+      (when lisp-proc
+        (delete-process lisp-proc)))))
 
 (defun clution--dired-system-open (button)
   (clution--system-query-files
    (overlay-get button 'clution--dired-item-system)))
-
-(defun clution--dired-system-close (button)
-  )
 
 (defun clution--dired-system-toggle (button)
   (if (overlay-get button 'clution--dired-item-open)

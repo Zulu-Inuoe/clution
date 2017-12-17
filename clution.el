@@ -134,9 +134,6 @@
       (clution-output-mode))
     buffer))
 
-(defun clution--parse-string (str)
-  (car (read-from-string str)))
-
 (defun clution--update-system-query (system)
   (when-let ((query (ignore-errors (clution--system-query system))))
     (setf (getf system :system-query) query)))
@@ -160,19 +157,30 @@
    :args (getf data :args)
    :system-query nil))
 
+(defun clution--make-cuo (data)
+  (copy-list data))
+
+(defun clution--parse-cuo-file (path)
+  (clution--make-cuo
+   (car
+    (read-from-string
+     (with-temp-buffer
+       (insert-file-contents path)
+       (buffer-string))))))
+
 (defun clution--make-clution (data &optional path)
   (let ((res
          (list
           :name (getf data :name)
           :path path
           :systems nil
-          :selected-system (getf data :selected-system)
           :output-dir
           (when-let ((dir (getf data :output-dir)))
             (file-name-as-directory dir))
           :tmp-dir
           (when-let ((dir (getf data :tmp-dir)))
-            (file-name-as-directory dir)))))
+            (file-name-as-directory dir))
+          :cuo nil)))
 
     (setf (getf res :systems)
           (mapcar
@@ -185,14 +193,18 @@
         (setf (getf sys :system-query) (car queries))
         (pop queries)))
 
+    (when (file-exists-p (clution--clution.cuo-path res))
+      (setf (getf res :cuo) (clution--parse-cuo-file (clution--clution.cuo-path res))))
+
     res))
 
 (defun clution--parse-file (path)
   (clution--make-clution
-   (clution--parse-string
-          (with-temp-buffer
-            (insert-file-contents path)
-            (buffer-string)))
+   (car
+    (read-from-string
+     (with-temp-buffer
+       (insert-file-contents path)
+       (buffer-string))))
    path))
 
 (defun clution--clution.name (&optional clution)
@@ -213,12 +225,18 @@
 
   (getf clution :systems))
 
+(defun clution--clution.cuo (&optional clution)
+  (unless clution
+    (setf clution *clution--current-clution*))
+
+  (getf clution :cuo))
+
 (defun clution--clution.selected-system (&optional clution)
   (unless clution
     (setf clution *clution--current-clution*))
 
   (find
-   (or (getf clution :selected-system)
+   (or (getf (clution--clution.cuo clution) :selected-system)
        (let ((sys (first (clution--clution.systems clution))))
          (if sys (clution--system.name sys) nil)))
    (clution--clution.systems clution)
@@ -244,6 +262,23 @@
        (expand-file-name
         "tmp"
         (clution--clution.dir clution)))))
+
+(defun clution--clution.cuo-dir (&optional clution)
+  (unless clution
+    (setf clution *clution--current-clution*))
+
+  (file-name-as-directory
+   (expand-file-name
+    "cuo"
+    (clution--clution.tmp-dir clution))))
+
+(defun clution--clution.cuo-path (&optional clution)
+  (unless clution
+    (setf clution *clution--current-clution*))
+
+  (expand-file-name
+   (concat (clution--clution.name clution) ".cuo")
+   (clution--clution.cuo-dir clution)))
 
 (defun clution--clution.script-dir (&optional clution)
   (unless clution
@@ -973,6 +1008,7 @@ _ALIST is ignored."
     (setf *clution--clutex-window* nil)))
 
 (add-to-list 'auto-mode-alist '("\\.clu$" . clution-file-mode))
+(add-to-list 'auto-mode-alist '("\\.cuo$" . clution-file-mode))
 (add-hook 'find-file-hook 'clution--find-file-hook)
 
 (add-to-list 'purpose-user-mode-purposes '(clution-output-mode . clution-output))

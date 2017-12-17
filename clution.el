@@ -1,15 +1,15 @@
 (require 'cl-lib)
 
-(define-derived-mode clution-dired-mode special-mode "ClutionDired"
+(define-derived-mode clutex-mode special-mode "ClutexMode"
   "A major mode for displaying the directory tree in a clution."
   (setq indent-tabs-mode nil
         buffer-read-only t
         truncate-lines -1))
 
-(defun clution--dired-buffer ()
-  (let ((buffer (get-buffer-create "*clution-dired*")))
+(defun clution--clutex-buffer ()
+  (let ((buffer (get-buffer-create "*clution-clutex*")))
     (with-current-buffer buffer
-      (clution-dired-mode))
+      (clutex-mode))
     buffer))
 
 (defun clution--eval-in-lisp (sexpr)
@@ -69,19 +69,64 @@
 (defun clution--system-query (system)
   (car (clution--systems-query (list system))))
 
-(defun clution--populate-dired (clution buffer)
+(defun clution--clution-button-action (button)
+  (let ((clution (overlay-get button :clution)))
+    (find-file (clution--clution.path clution))))
+
+(defun clution--child-button-action (button)
+  (let ((child (overlay-get button :clution-child)))
+    (find-file (getf (car child) :PATH))))
+
+(defun clution--parent-button-action (button)
+  (let ((parent (overlay-get button :clution-parent)))))
+
+(defun clution--insert-children (children indent)
+  (dolist (child children)
+    (insert-char ?\s indent)
+    (case (getf (car child) :TYPE)
+      (:CHILD
+       (insert-button
+        (file-name-nondirectory (getf (car child) :PATH))
+        'action 'clution--child-button-action
+        'follow-link "\C-m"
+        :clution-child child)
+       (insert "\n"))
+      (:PARENT
+       (insert-button
+        (concat "> " (getf (car child) :NAME))
+        'action 'clution--parent-button-action
+        'follow-link "\C-m"
+        :clution-parent child)
+       (insert "\n")
+       (clution--insert-children (cdr child) (+ indent 2))))))
+
+(defun clution--system-button-action (button)
+  (let ((system (overlay-get button :clution-system)))
+    (find-file (clution--system.path system))))
+
+(defun clution--populate-clutex (clution buffer)
   (with-current-buffer buffer
+    (insert-button
+     (clution--clution.name clution)
+     'action 'clution--clution-button-action
+     'follow-link "\C-m"
+     :clution clution)
+    (insert "\n")
     (dolist (system (clution--clution.systems clution))
+      (insert "  ")
       (insert-button
-       (clution--system.name system)
-       'action 'clution--dired-system-toggle
-       'clution--dired-item-system system
-       'clution--dired-item-open nil))))
+       (concat "> " (file-name-nondirectory (clution--system.path system)))
+       'action 'clution--system-button-action
+       'follow-link "\C-m"
+       :clution-system system)
+      (insert "\n")
+      (clution--insert-children (clution--system.children system) 4))))
 
 (defvar *clution--current-clution* nil)
 (defvar *clution--current-watch* nil)
 (defvar *clution--repl-active* nil)
 (defvar *clution--current-op* nil)
+(defvar *clution--clutex-window* nil)
 
 (defun clution--output-buffer ()
   (let ((buffer (get-buffer-create "*clution-output*")))
@@ -508,7 +553,7 @@
                        'clution--build-filter
                        'clution--build-sentinel)))
       (process-send-string build-proc
-                           (format "%S\n" (clution--build-form system nil))))))
+                           (format "%S\n" (clution--build-form system t))))))
 
 (defun clution--kickoff-build (systems)
   (clution--append-output "Building systems:\n")
@@ -832,17 +877,90 @@
           (file-notify-add-watch path '(change) 'clution--file-watch-callback))
 
     (with-current-buffer (clution--output-buffer)
-      (setf default-directory (clution--clution.dir *clution--current-clution*))))
+      (setf default-directory (clution--clution.dir *clution--current-clution*)))
+
+    (with-current-buffer (clution--clutex-buffer)
+      (setf default-directory (clution--clution.dir *clution--current-clution*))
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (clution--populate-clutex *clution--current-clution* (current-buffer)))))
+
   (run-hooks 'clution-open-hook))
 
 (defun clution-close ()
   (interactive)
   (when *clution--current-clution*
+    (with-current-buffer (clution--output-buffer)
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert "No clution open.")))
+
+    (with-current-buffer (clution--clutex-buffer)
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (insert "No clution open.")))
+
+    (clution--kill-buffer-if-no-window "*clution-clutex*")
+    (clution--kill-buffer-if-no-window "*clution-ouput*")
+
     (file-notify-rm-watch *clution--current-watch*)
     (setf *clution--current-watch* nil)
     (setf *clution--current-clution* nil)
 
     (run-hooks 'clution-close-hook)))
+
+(defcustom clution-clutex-position 'right
+  "The position of the clutex window."
+  :type '(choice (const right)
+                 (const left))
+  :group 'clution)
+
+(defcustom clution-clutex-width 25
+  "The width of the clutex window."
+  :type 'integer
+  :group 'clution)
+
+(defun clution-clutex-default-display-fn (buffer _alist)
+  "Display BUFFER to the left or right of the root window.
+The side is decided according to `clution-clutex-position'
+The root window is the root window of the selected frame.
+_ALIST is ignored."
+  (let ((window-pos (if (eq clution-clutex-position 'right) 'right 'left)))
+    (display-buffer-in-side-window buffer `((side . ,window-pos)))))
+
+(defun clution--set-window-width (window n)
+  "Make WINDOW N columns width."
+  (let ((w (max n window-min-width)))
+    (unless (null window)
+      (if (> (window-width) w)
+          (shrink-window-horizontally (- (window-width) w))
+        (if (< (window-width) w)
+            (enlarge-window-horizontally (- w (window-width))))))))
+
+(defun clution--kill-buffer-if-no-window (buffer-or-name)
+  (when-let ((buffer (get-buffer buffer-or-name)))
+    (unless (get-buffer-window-list buffer)
+      (kill-buffer buffer))))
+
+(defun clution-refresh-clutex ()
+  (interactive)
+  (with-current-buffer (clution--clutex-buffer)
+    (let ((inhibit-read-only t))
+      (erase-buffer)
+      (clution--populate-clutex *clution--current-clution* (current-buffer)))))
+
+(defun clution--init-clutex-window (window clution)
+  (set-window-dedicated-p window t)
+  (clution--set-window-width clution clution-clutex-width))
+
+(defun clution-open-clutex ()
+  (interactive)
+  (unless (window-live-p *clution--clutex-window*)
+    (setf *clution--clutex-window*
+          (display-buffer
+           (clution--clutex-buffer)
+           'clution-clutex-default-display-fn))
+    (clution--init-clutex-window *clution--clutex-window*)))
 
 (add-to-list 'auto-mode-alist '("\\.clu$" . clution-file-mode))
 (add-hook 'find-file-hook 'clution--find-file-hook)

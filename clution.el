@@ -302,6 +302,14 @@
 (defun clution--system.args (clution-system)
   (getf clution-system :args))
 
+(defun clution--system.cache-dir (clution-system)
+  (or (and (clution--system.clution clution-system)
+           (file-name-as-directory
+            (expand-file-name
+             (clution--system.name clution-system)
+             (clution--clution.asdf-dir (clution--system.clution clution-system)))))
+      (error "no cache dir for %S" clution-system)))
+
 (defun clution--system.script-path (clution-system)
   (concat
    (file-name-as-directory
@@ -390,10 +398,7 @@
               (clution--system.dir system))
              (expand-file-name
               "**/*.*"
-              (file-name-as-directory
-               (expand-file-name
-                (clution--system.name system)
-                (clution--clution.asdf-dir clution))))))
+              (clution--system.cache-dir system))))
           (clution--clution.systems clution))))
     `(cl:flet ((clution-system-searcher (system-name)
                                      (cl:loop :for (name . path) :in ',names-paths-alist
@@ -663,10 +668,7 @@
 
 (defun clution--do-clean (systems)
   (dolist (system systems)
-    (let ((system-cache-dir (file-name-as-directory
-                             (concat
-                              (clution--clution.asdf-dir)
-                              (clution--system.name system)))))
+    (let ((system-cache-dir (clution--system.cache-dir system)))
       (when (file-exists-p system-cache-dir)
         (clution--append-output
          "Removing '" (clution--system.name system)

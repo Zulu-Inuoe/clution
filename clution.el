@@ -1,17 +1,5 @@
 (require 'cl-lib)
 
-(define-derived-mode clutex-mode special-mode "ClutexMode"
-  "A major mode for displaying the directory tree in a clution."
-  (setq indent-tabs-mode nil
-        buffer-read-only t
-        truncate-lines -1))
-
-(defun clution--clutex-buffer ()
-  (let ((buffer (get-buffer-create "*clution-clutex*")))
-    (with-current-buffer buffer
-      (clutex-mode))
-    buffer))
-
 (defun clution--eval-in-lisp (sexpr)
   (lexical-let* ((lisp-proc nil)
                  (output ""))
@@ -69,6 +57,15 @@
 (defun clution--system-query (system)
   (car (clution--systems-query (list system))))
 
+(defvar *clution--current-clution* nil)
+(defvar *clution--current-watch* nil)
+(defvar *clution--repl-active* nil)
+(defvar *clution--current-op* nil)
+
+;;; Buffer and window manipulation
+(defvar *clution--output-window* nil)
+(defvar *clution--clutex-window* nil)
+
 (defun clution--clution-button-action (button)
   (let ((clution (overlay-get button :clution)))
     (find-file (clution--clution.path clution))))
@@ -122,17 +119,87 @@
       (insert "\n")
       (clution--insert-children (clution--system.children system) 4))))
 
-(defvar *clution--current-clution* nil)
-(defvar *clution--current-watch* nil)
-(defvar *clution--repl-active* nil)
-(defvar *clution--current-op* nil)
-(defvar *clution--clutex-window* nil)
-
-(defun clution--output-buffer ()
-  (let ((buffer (get-buffer-create "*clution-output*")))
-    (with-current-buffer buffer
-      (clution-output-mode))
+(defun clution--output-buffer (&optional create)
+  (let ((buffer (get-buffer "*clution-output*")))
+    (when (and (null buffer) create)
+      (setf buffer (generate-new-buffer "*clution-output*"))
+      (with-current-buffer buffer
+        (clution-output-mode)))
     buffer))
+
+(defun clution--clutex-buffer (&optional create)
+  (let ((buffer (get-buffer "*clution-clutex*")))
+    (when (and (null buffer) create)
+      (setf buffer (generate-new-buffer "*clution-clutex*"))
+      (with-current-buffer buffer
+        (clutex-mode)))
+    buffer))
+
+(defun clution--set-window-height (window n)
+  "Make WINDOW N rows height."
+  (with-selected-window window
+    (let ((h (max n window-min-height)))
+      (unless (null window)
+        (if (> (window-height) h)
+            (shrink-window (- (window-height) h))
+          (if (< (window-height) h)
+              (enlarge-window (- h (window-height)))))))))
+
+(defun clution--set-window-width (window n)
+  "Make WINDOW N columns width."
+  (with-selected-window window
+    (let ((w (max n window-min-width)))
+      (unless (null window)
+        (if (> (window-width) w)
+            (shrink-window-horizontally (- (window-width) w))
+          (if (< (window-width) w)
+              (enlarge-window-horizontally (- w (window-width)))))))))
+
+(defun clution--kill-buffer-if-no-window (buffer-or-name)
+  (when-let ((buffer (get-buffer buffer-or-name)))
+    (unless (get-buffer-window-list buffer)
+      (kill-buffer buffer))))
+
+(defun clution--sync-output (clution buffer)
+  (with-current-buffer buffer
+    (let ((inhibit-read-only t))
+      (erase-buffer)
+      (cond
+       (clution
+        (setf default-directory (clution--clution.dir clution))
+        (insert "Output buffer for '" (clution--clution.name clution) "' (" (clution--clution.dir clution) ")\n"))
+       (t
+        (insert "No clution open.\n"))))))
+
+(defun clution--sync-clutex (clution buffer)
+  (with-current-buffer buffer
+    (let ((inhibit-read-only t))
+      (erase-buffer)
+      (cond
+       (clution
+        (setf default-directory (clution--clution.dir clution))
+        (clution--populate-clutex clution buffer))
+       (t
+        (insert "No clution open.\n"))))))
+
+(defun clution--sync-buffers (clution)
+  (when-let ((buffer (clution--output-buffer)))
+    (clution--sync-output clution buffer)
+    (clution--kill-buffer-if-no-window buffer))
+
+  (when-let ((buffer (clution--clutex-buffer)))
+    (clution--sync-clutex clution buffer)
+    (clution--kill-buffer-if-no-window buffer)))
+
+(defun clution--init-output-window (window)
+  (set-window-dedicated-p window t)
+  (clution--set-window-height window 15))
+
+(defun clution--init-clutex-window (window)
+  (set-window-dedicated-p window t)
+  (clution--set-window-width window clution-clutex-width))
+
+;;;; Clution/System data structures, and loaders
 
 (defun clution--update-system-query (system)
   (when-let ((query (ignore-errors (clution--system-query system))))
@@ -354,7 +421,10 @@
    (clution--system.name clution-system)
    "-script.lisp"))
 
+;;;; Frontend/Backend Lisp access
+
 (defun clution--spawn-lisp-command ()
+  "Command to spawn a lisp in a REL (repl without the print)."
   (ecase clution-frontend
     (raw
      (ecase clution-backend
@@ -362,6 +432,7 @@
     (roswell "ros")))
 
 (defun clution--spawn-lisp-args ()
+  "Arguments to spawn a lisp in a REL (repl without the print)."
   (ecase clution-frontend
     (raw
      (ecase clution-backend
@@ -376,6 +447,7 @@
           "--noprint" "--disable-debugger"))))))
 
 (defun clution--spawn-script-command ()
+  "Command to spawn a lisp which will load a script file, then exit."
   (ecase clution-frontend
     (raw
      (ecase clution-backend
@@ -383,6 +455,7 @@
     (roswell "ros")))
 
 (defun clution--spawn-script-args (system)
+  "Arguments to spawn a lisp which will load a script file, then exit."
   (let ((script-path (clution--system.script-path system))
         (script-args (clution--system.args system)))
     (ecase clution-frontend
@@ -401,6 +474,7 @@
             ,@script-args)))))))
 
 (defun clution--spawn-repl-command ()
+  "Command to spawn a lisp in a REPL."
   (ecase clution-frontend
     (raw
      (ecase clution-backend
@@ -408,6 +482,7 @@
     (roswell "ros")))
 
 (defun clution--spawn-repl-args ()
+  "Arguments to spawn a lisp in a REPL."
   (ecase clution-frontend
     (raw
      (ecase clution-backend
@@ -415,6 +490,20 @@
     (roswell
      (ecase clution-backend
        (sbcl '("run" "--lisp" "sbcl-bin"))))))
+
+(defun clution--args-list-form ()
+  "An SEXP which when evaludated in the lisp backend will evaluate to the list
+of command-line arguments"
+  (ecase clution-backend
+    (sbcl
+     '(cdr sb-ext:*posix-argv*))))
+
+(defun clution--exit-form (exit-code-form)
+  "A SEXP which when evaluated in the lisp backend, will exit the program with
+the code obtained from evaluating the given `exit-code-form'."
+  (ecase clution-backend
+    (sbcl
+     `(sb-ext:exit :code ,exit-code-form))))
 
 (defun clution--with-system-searcher (clution lispexpr)
   (let ((names-paths-alist
@@ -456,16 +545,6 @@
              ',system-output-translations))
            asdf:*output-translations-parameter*))
          (clution-do)))))
-
-(defun clution--args-list-form ()
-  (ecase clution-backend
-    (sbcl
-     '(cdr sb-ext:*posix-argv*))))
-
-(defun clution--exit-form (exit-code-form)
-  (ecase clution-backend
-    (sbcl
-     `(sb-ext:exit :code ,exit-code-form))))
 
 (defun clution--build-form (system force)
   `(progn
@@ -547,18 +626,20 @@
     (set-process-sentinel proc sentinel)))
 
 (defun clution--clear-output ()
-  (with-current-buffer (clution--output-buffer)
-    (let ((inhibit-read-only t))
-      (erase-buffer))))
+  (when-let ((buffer (clution--output-buffer)))
+    (with-current-buffer buffer
+      (let ((inhibit-read-only t))
+        (erase-buffer)))))
 
 (defun clution--append-output (&rest args)
-  (with-current-buffer (clution--output-buffer)
-    (let ((inhibit-read-only t))
-      (goto-char (point-max))
-      (apply 'insert args)))
-  (when-let ((output-window (get-buffer-window (clution--output-buffer))))
-    (with-selected-window output-window
-      (set-window-point output-window (point-max)))))
+  (when-let ((buffer (clution--output-buffer)))
+    (with-current-buffer buffer
+      (let ((inhibit-read-only t))
+        (goto-char (point-max))
+        (apply 'insert args)))
+    (when-let ((output-window (get-buffer-window buffer)))
+      (with-selected-window output-window
+        (set-window-point output-window (point-max))))))
 
 (defvar *clution--build-remaining-systems* nil)
 
@@ -712,10 +793,6 @@
 
         (delete-directory system-cache-dir t)))))
 
-(defun make-setup-script (clution setup-form))
-
-(defun make-init-script (clution init-form))
-
 (defun clution--start-repl ()
   (clution--append-output
    "\nClution REPL starting with style '" (format "%s" clution-repl-style) "'\n")
@@ -771,6 +848,47 @@
       (attribute-changed)
       (stopped))))
 
+;;;; Publix interface
+
+;;; Customization
+
+(defgroup clution nil
+  "Options for clution."
+  :prefix "clution-")
+
+(defcustom clution-frontend 'roswell
+  "The frontend to use as default for clution."
+  :type '(choice (const :tag "Use clution-backend directly" raw)
+                 (const :tag "Roswell" roswell))
+  :group 'clution)
+
+(defcustom clution-backend 'sbcl
+  "The backend to use as default for clution."
+  :type '(choice (const :tag "sbcl" sbcl))
+  :group 'clution)
+
+(defcustom clution-repl-style 'sly
+  "The type of repl to use for clution"
+  :type '(choice (const :tag "Use Sly" sly))
+  :group 'clution)
+
+(defgroup clutex nil
+  "Options for clutex."
+  :prefix "clution-clutex-"
+  :group 'clution)
+
+(defcustom clution-clutex-position 'right
+  "The position of the clutex window."
+  :type '(choice (const right)
+                 (const left))
+  :group 'clutex)
+
+(defcustom clution-clutex-width 25
+  "The width of the clutex window."
+  :type 'integer
+  :group 'clutex)
+
+;;; Hooks
 (defvar clution-open-hook nil
   "Hook executed whenever a clution is opened.")
 
@@ -789,21 +907,7 @@
 (defvar clution-run-complete-hook nil
   "Hook executed whenever a 'run' operation completes.")
 
-(defcustom clution-frontend 'roswell
-  "The frontend to use as default for clution."
-  :type '(choice (const :tag "Use clution-backend directly" raw)
-                 (const :tag "Roswell" roswell))
-  :group 'clution)
-
-(defcustom clution-backend 'sbcl
-  "The backend to use as default for clution."
-  :type '(choice (const :tag "sbcl" sbcl))
-  :group 'clution)
-
-(defcustom clution-repl-style 'sly
-  "The type of repl to use for clution"
-  :type '(choice (const :tag "Use Sly" sly))
-  :group 'clution)
+;;; Modes and maps
 
 (defvar clution-mode-map
   (let ((map (make-sparse-keymap)))
@@ -821,11 +925,33 @@
   "clution-file"
   "Major mode for editing a clution project file.")
 
+(define-derived-mode cuo-file-mode lisp-mode
+  "cuo-file"
+  "Major mode for editing a clution user options file")
+
+(defvar clution-output-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "q") 'clution-close-output)
+    map))
+
 (define-derived-mode clution-output-mode compilation-mode
   "clution-output"
   "Mode for the clution output buffer"
   (setq buffer-read-only t
         truncate-lines -1))
+
+(defvar clutex-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd "q") 'clution-close-clutex)
+    map))
+
+(define-derived-mode clutex-mode special-mode "ClutexMode"
+  "A major mode for displaying the directory tree in a clution."
+  (setq indent-tabs-mode nil
+        buffer-read-only t
+        truncate-lines -1))
+
+;;; Functions
 
 (defun clution-repl ()
   (interactive)
@@ -913,32 +1039,14 @@
     (setf *clution--current-watch*
           (file-notify-add-watch path '(change) 'clution--file-watch-callback))
 
-    (with-current-buffer (clution--output-buffer)
-      (setf default-directory (clution--clution.dir *clution--current-clution*)))
-
-    (with-current-buffer (clution--clutex-buffer)
-      (setf default-directory (clution--clution.dir *clution--current-clution*))
-      (let ((inhibit-read-only t))
-        (erase-buffer)
-        (clution--populate-clutex *clution--current-clution* (current-buffer)))))
+    (clution--sync-buffers *clution--current-clution*))
 
   (run-hooks 'clution-open-hook))
 
 (defun clution-close ()
   (interactive)
   (when *clution--current-clution*
-    (with-current-buffer (clution--output-buffer)
-      (let ((inhibit-read-only t))
-        (erase-buffer)
-        (insert "No clution open.")))
-
-    (with-current-buffer (clution--clutex-buffer)
-      (let ((inhibit-read-only t))
-        (erase-buffer)
-        (insert "No clution open.")))
-
-    (clution--kill-buffer-if-no-window "*clution-clutex*")
-    (clution--kill-buffer-if-no-window "*clution-ouput*")
+    (clution--sync-buffers nil)
 
     (file-notify-rm-watch *clution--current-watch*)
     (setf *clution--current-watch* nil)
@@ -946,16 +1054,27 @@
 
     (run-hooks 'clution-close-hook)))
 
-(defcustom clution-clutex-position 'right
-  "The position of the clutex window."
-  :type '(choice (const right)
-                 (const left))
-  :group 'clution)
+(defun clution-output-default-display-fn (buffer _alist)
+  "Display BUFFER to the bottom of the root window.
+The root window is the root window of the selected frame.
+_ALIST is ignored."
+  (display-buffer-in-side-window buffer '((side . bottom))))
 
-(defcustom clution-clutex-width 25
-  "The width of the clutex window."
-  :type 'integer
-  :group 'clution)
+(defun clution-open-output ()
+  (interactive)
+  (unless (window-live-p *clution--output-window*)
+    (let ((buffer (clution--output-buffer t)))
+      (clution--sync-output *clution--current-clution* buffer)
+      (setf *clution--output-window*
+            (display-buffer buffer '(clution-output-default-display-fn))))
+    (clution--init-output-window *clution--output-window*)))
+
+(defun clution-close-output ()
+  (interactive)
+  (when (window-live-p *clution--output-window*)
+    (delete-window *clution--output-window*))
+  (setf *clution--output-window* nil)
+  (clution--kill-buffer-if-no-window (clution--output-buffer)))
 
 (defun clution-clutex-default-display-fn (buffer _alist)
   "Display BUFFER to the left or right of the root window.
@@ -965,50 +1084,24 @@ _ALIST is ignored."
   (let ((window-pos (if (eq clution-clutex-position 'right) 'right 'left)))
     (display-buffer-in-side-window buffer `((side . ,window-pos)))))
 
-(defun clution--set-window-width (window n)
-  "Make WINDOW N columns width."
-  (with-selected-window window
-    (let ((w (max n window-min-width)))
-      (unless (null window)
-        (if (> (window-width) w)
-            (shrink-window-horizontally (- (window-width) w))
-          (if (< (window-width) w)
-              (enlarge-window-horizontally (- w (window-width)))))))))
-
-(defun clution--kill-buffer-if-no-window (buffer-or-name)
-  (when-let ((buffer (get-buffer buffer-or-name)))
-    (unless (get-buffer-window-list buffer)
-      (kill-buffer buffer))))
-
-(defun clution-refresh-clutex ()
-  (interactive)
-  (with-current-buffer (clution--clutex-buffer)
-    (let ((inhibit-read-only t))
-      (erase-buffer)
-      (clution--populate-clutex *clution--current-clution* (current-buffer)))))
-
-(defun clution--init-clutex-window (window)
-  (set-window-dedicated-p window t)
-  (clution--set-window-width window clution-clutex-width))
-
 (defun clution-open-clutex ()
   (interactive)
   (unless (window-live-p *clution--clutex-window*)
-    (setf *clution--clutex-window*
-          (display-buffer
-           (clution--clutex-buffer)
-           'clution-clutex-default-display-fn))
+    (let ((buffer (clution--clutex-buffer t)))
+      (clution--sync-clutex *clution--current-clution* buffer)
+      (setf *clution--clutex-window*
+            (display-buffer buffer '(clution-clutex-default-display-fn))))
     (clution--init-clutex-window *clution--clutex-window*)))
 
 (defun clution-close-clutex ()
   (interactive)
   (when (window-live-p *clution--clutex-window*)
-    (delete-window *clution--clutex-window*)
-    (kill-buffer-if-not-modified "*clution-clutex*")
-    (setf *clution--clutex-window* nil)))
+    (delete-window *clution--clutex-window*))
+  (setf *clution--clutex-window* nil)
+  (clution--kill-buffer-if-no-window (clution--clutex-buffer)))
 
 (add-to-list 'auto-mode-alist '("\\.clu$" . clution-file-mode))
-(add-to-list 'auto-mode-alist '("\\.cuo$" . clution-file-mode))
+(add-to-list 'auto-mode-alist '("\\.cuo$" . cuo-file-mode))
 (add-hook 'find-file-hook 'clution--find-file-hook)
 
 (add-to-list 'purpose-user-mode-purposes '(clution-output-mode . clution-output))

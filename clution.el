@@ -492,18 +492,18 @@
        (sbcl '("run" "--lisp" "sbcl-bin"))))))
 
 (defun clution--args-list-form ()
-  "An SEXP which when evaludated in the lisp backend will evaluate to the list
+  "An SEXP which when evaluated in the lisp backend will evaluate to the list
 of command-line arguments"
   (ecase clution-backend
-    (sbcl
-     '(cdr sb-ext:*posix-argv*))))
+    (t
+     'uiop:*command-line-arguments*)))
 
 (defun clution--exit-form (exit-code-form)
   "A SEXP which when evaluated in the lisp backend, will exit the program with
 the code obtained from evaluating the given `exit-code-form'."
   (ecase clution-backend
-    (sbcl
-     `(sb-ext:exit :code ,exit-code-form))))
+    (t
+     `(uiop:quit ,exit-code-form nil))))
 
 (defun clution--with-system-searcher (clution lispexpr)
   (let ((names-paths-alist

@@ -66,58 +66,107 @@
 (defvar *clution--output-window* nil)
 (defvar *clution--clutex-window* nil)
 
-(defun clution--clution-button-action (button)
-  (let ((clution (overlay-get button :clution)))
-    (find-file (clution--clution.path clution))))
+(defun clution--insert-clution-button (clution)
+  (lexical-let* ((clution clution)
+                 (map (make-sparse-keymap))
+                 (button
+                  (insert-button
+                   (clution--clution.name clution)
+                   'keymap map)))
+    (define-key map (kbd "C-m")
+      (lambda ()
+        (interactive)
+        (find-file (clution--clution.path clution))))
+    (define-key map (kbd "<double-down-mouse-1>")
+      (lambda ()
+        (interactive)
+        (find-file (clution--clution.path clution))))
+    button))
 
-(defun clution--child-button-action (button)
-  (let ((child (overlay-get button :clution-child)))
-    (find-file (getf (car child) :PATH))))
+(defun clution--insert-system-button (system)
+  (lexical-let* ((system system)
+                 (map (make-sparse-keymap))
+                 (button
+                  (insert-button
+                   (concat "> " (file-name-nondirectory (clution--system.path system)))
+                   'keymap map)))
+    (define-key map (kbd "TAB")
+      (lambda ()
+        (interactive)
+        (clution--toggle-system-fold system)))
+    (define-key map (kbd "<mouse-1>")
+      (lambda ()
+        (interactive)
+        (clution--toggle-system-fold system)))
+    (define-key map (kbd "<delete>")
+      (lambda ()
+        (interactive)
+        (clution--remove-system system)))
+    (define-key map (kbd "C-m")
+      (lambda ()
+        (interactive)
+        (find-file (clution--system.path system))))
+    (define-key map (kbd "<double-down-mouse-1>")
+      (lambda ()
+        (interactive)
+        (find-file (clution--system.path system))))
+    button))
 
-(defun clution--parent-button-action (button)
-  (let ((parent (overlay-get button :clution-parent)))))
+(defun clution--insert-parent-button (parent)
+  (lexical-let* ((parent parent)
+                 (map (make-sparse-keymap))
+                 (button
+                  (insert-button
+                   (concat "> " (getf (car parent) :NAME))
+                   'keymap map)))
+    button))
 
-(defun clution--insert-children (children indent)
-  (dolist (child children)
+(defun clution--insert-child-button (child)
+  (lexical-let* ((child child)
+                 (map (make-sparse-keymap))
+                 (button
+                  (insert-button
+                   (file-name-nondirectory (getf (car child) :PATH))
+                   'keymap map)))
+    (define-key map (kbd "C-m")
+      (lambda ()
+        (interactive)
+        (find-file (getf (car child) :PATH))))
+    (define-key map (kbd "<double-down-mouse-1>")
+      (lambda ()
+        (interactive)
+        (find-file (getf (car child) :PATH))))
+    (define-key map (kbd "<delete>")
+      (lambda ()
+        (interactive)
+        (clution--remove-child child nil)))
+    (define-key map (kbd "S-<delete>")
+      (lambda ()
+        (interactive)
+        (clution--remove-child child t)))
+    button))
+
+(defun clution--insert-nodes (system nodes indent)
+  (dolist (node nodes)
     (insert-char ?\s indent)
-    (case (getf (car child) :TYPE)
+    (case (getf (car node) :TYPE)
       (:CHILD
-       (insert-button
-        (file-name-nondirectory (getf (car child) :PATH))
-        'action 'clution--child-button-action
-        'follow-link "\C-m"
-        :clution-child child)
+       (clution--insert-child-button system node)
        (insert "\n"))
       (:PARENT
-       (insert-button
-        (concat "> " (getf (car child) :NAME))
-        'action 'clution--parent-button-action
-        'follow-link "\C-m"
-        :clution-parent child)
+       (clution--insert-parent-button system node)
        (insert "\n")
-       (clution--insert-children (cdr child) (+ indent 2))))))
-
-(defun clution--system-button-action (button)
-  (let ((system (overlay-get button :clution-system)))
-    (find-file (clution--system.path system))))
+       (clution--insert-nodes (cdr node) (+ indent 2))))))
 
 (defun clution--populate-clutex (clution buffer)
   (with-current-buffer buffer
-    (insert-button
-     (clution--clution.name clution)
-     'action 'clution--clution-button-action
-     'follow-link "\C-m"
-     :clution clution)
+    (clution--insert-clution-button clution)
     (insert "\n")
     (dolist (system (clution--clution.systems clution))
       (insert "  ")
-      (insert-button
-       (concat "> " (file-name-nondirectory (clution--system.path system)))
-       'action 'clution--system-button-action
-       'follow-link "\C-m"
-       :clution-system system)
+      (clution--insert-system-button system)
       (insert "\n")
-      (clution--insert-children (clution--system.children system) 4))))
+      (clution--insert-nodes (clution--system.children system) 4))))
 
 (defun clution--output-buffer (&optional create)
   (let ((buffer (get-buffer "*clution-output*")))

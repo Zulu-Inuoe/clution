@@ -1276,6 +1276,10 @@ the code obtained from evaluating the given `exit-code-form'."
     (setf *clution--current-clution* (clution--make-asd-clution path))
     (clution--sync-buffers *clution--current-clution*))
 
+  (when clution-intrusive-ui
+    (clution-open-clutex)
+    (clution-open-output))
+
   (run-hooks 'clution-open-hook))
 
 (defun clution-close ()

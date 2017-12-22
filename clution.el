@@ -100,11 +100,10 @@
     (define-key map (kbd "C-m")
       (lambda ()
         (interactive)
-        (find-file (clution--clution.path clution))))
-    (define-key map (kbd "<double-down-mouse-1>")
-      (lambda ()
-        (interactive)
-        (find-file (clution--clution.path clution))))
+        (if-let ((path (clution--clution.path clution)))
+            (find-file path)
+          (message "clution is virtual"))))
+    (define-key map (kbd "<double-down-mouse-1>") (kbd "C-m"))
 
     (define-key map (kbd "A")
       (lambda ()
@@ -141,10 +140,7 @@
       (lambda ()
         (interactive)
         (find-file (clution--system.path system))))
-    (define-key map (kbd "<double-down-mouse-1>")
-      (lambda ()
-        (interactive)
-        (find-file (clution--system.path system))))
+    (define-key map (kbd "<double-down-mouse-1>") (kbd "C-m"))
     button))
 
 (defun clution--insert-parent-button (system parent)
@@ -169,10 +165,7 @@
       (lambda ()
         (interactive)
         (find-file (getf (car child) :PATH))))
-    (define-key map (kbd "<double-down-mouse-1>")
-      (lambda ()
-        (interactive)
-        (find-file (getf (car child) :PATH))))
+    (define-key map (kbd "<double-down-mouse-1>") (kbd "C-m"))
     (define-key map (kbd "<delete>")
       (lambda ()
         (interactive)
@@ -425,6 +418,21 @@
 
     res))
 
+(defun clution--make-asd-clution (asd-path)
+  (let ((res
+         (list
+          :name (file-name-base asd-path)
+          :dir (file-name-directory asd-path)
+          :systems nil
+          :output-dir nil
+          :tmp-dir nil
+          :cuo nil)))
+
+    (let ((sys (clution--make-system (list :path asd-path) res)))
+      (setf (getf res :systems) (list sys))
+      (setf (getf sys :system-query) (clution--system-query sys)))
+    res))
+
 (defun clution--parse-file (path)
   (clution--make-clution
    (car
@@ -438,7 +446,8 @@
   (unless clution
     (setf clution *clution--current-clution*))
 
-  (downcase (file-name-base (clution--clution.path clution))))
+  (or (getf clution :name)
+      (downcase (file-name-base (clution--clution.path clution)))))
 
 (defun clution--clution.path (&optional clution)
   (unless clution
@@ -536,7 +545,9 @@
 (defun clution--clution.dir (&optional clution)
   (unless clution
     (setf clution *clution--current-clution*))
-  (file-name-directory (clution--clution.path clution)))
+
+  (or (getf clution :dir)
+      (file-name-directory (clution--clution.path clution))))
 
 (defun clution--system.path (clution-system)
   (getf clution-system :path))
@@ -995,10 +1006,15 @@ the code obtained from evaluating the given `exit-code-form'."
 
 (defun clution--find-file-hook ()
   (let ((path (buffer-file-name)))
-    (when (and (null *clution--current-clution*)
-               (string-match-p "^clu$" (file-name-extension path))
-               (file-exists-p path))
-      (clution-open path))))
+    (cond
+     (*clution--current-clution*
+      nil)
+     ((not (file-exists-p path))
+      nil)
+     ((string-match-p "^clu$" (file-name-extension path))
+      (clution-enter path))
+     ((string-match-p "^asd$" (file-name-extension path))
+      (clution-enter-asd path)))))
 
 (defun clution--file-watch-callback (event)
   (destructuring-bind (descriptor action file &optional file1)
@@ -1102,6 +1118,7 @@ the code obtained from evaluating the given `exit-code-form'."
 (defvar clution-output-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "q") 'clution-close-output)
+    (define-key map (kbd "Q") 'clution-exit)
     map))
 
 (define-derived-mode clution-output-mode compilation-mode
@@ -1113,6 +1130,7 @@ the code obtained from evaluating the given `exit-code-form'."
 (defvar clutex-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "q") 'clution-close-clutex)
+    (define-key map (kbd "Q") 'clution-exit)
     map))
 
 (define-derived-mode clutex-mode special-mode "ClutexMode"
@@ -1219,16 +1237,52 @@ the code obtained from evaluating the given `exit-code-form'."
 
   (run-hooks 'clution-open-hook))
 
+(defun clution-open-asd (path)
+  (interactive
+   (list (clution--read-file-name "asd to open: " nil nil t)))
+
+  (when *clution--current-clution*
+    (clution-close))
+
+  (let ((path (expand-file-name path)))
+    (setf *clution--current-clution* (clution--make-asd-clution path))
+    (clution--sync-buffers *clution--current-clution*))
+
+  (run-hooks 'clution-open-hook))
+
 (defun clution-close ()
   (interactive)
   (when *clution--current-clution*
     (clution--sync-buffers nil)
 
-    (file-notify-rm-watch *clution--current-watch*)
+    (when *clution--current-watch*
+      (file-notify-rm-watch *clution--current-watch*))
     (setf *clution--current-watch* nil)
     (setf *clution--current-clution* nil)
 
     (run-hooks 'clution-close-hook)))
+
+(defun clution-enter (path)
+  (interactive
+   (list nil))
+  (when path
+    (clution-open path))
+  (clution-open-clutex)
+  (clution-open-output))
+
+(defun clution-enter-asd (path)
+  (interactive
+   (list nil))
+  (when path
+    (clution-open-asd path))
+  (clution-open-clutex)
+  (clution-open-output))
+
+(defun clution-exit ()
+  (interactive)
+  (clution-close)
+  (clution-close-clutex)
+  (clution-close-output))
 
 (defun clution-output-default-display-fn (buffer _alist)
   "Display BUFFER to the bottom of the root window.
@@ -1250,7 +1304,8 @@ _ALIST is ignored."
   (when (window-live-p *clution--output-window*)
     (delete-window *clution--output-window*))
   (setf *clution--output-window* nil)
-  (clution--kill-buffer-if-no-window (clution--output-buffer)))
+  (when-let ((buffer (clution--output-buffer)))
+    (clution--kill-buffer-if-no-window buffer)))
 
 (defun clution-clutex-default-display-fn (buffer _alist)
   "Display BUFFER to the left or right of the root window.
@@ -1274,7 +1329,8 @@ _ALIST is ignored."
   (when (window-live-p *clution--clutex-window*)
     (delete-window *clution--clutex-window*))
   (setf *clution--clutex-window* nil)
-  (clution--kill-buffer-if-no-window (clution--clutex-buffer)))
+  (when-let ((buffer (clution--clutex-buffer)))
+    (clution--kill-buffer-if-no-window buffer)))
 
 (add-to-list 'auto-mode-alist '("\\.clu$" . clution-file-mode))
 (add-to-list 'auto-mode-alist '("\\.cuo$" . cuo-file-mode))

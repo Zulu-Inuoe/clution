@@ -68,6 +68,19 @@
 (defun clution--system-query (system)
   (car (clution--systems-query (list system))))
 
+(defun clution--add-system (clution path)
+  (let ((system (clution--make-system
+                 (list :path path))))
+    (clution--clution.add-system clution system))
+  (clution--save-clution clution))
+
+(defun clution--remove-system (system &optional delete)
+  (let ((clution (clution--system.clution system)))
+    (unless clution
+      (error "system has no parent clution"))
+    (clution--clution.remove-system clution system)
+    (clution--save-clution clution)))
+
 (defvar *clution--current-clution* nil)
 (defvar *clution--current-watch* nil)
 (defvar *clution--repl-active* nil)
@@ -92,6 +105,12 @@
       (lambda ()
         (interactive)
         (find-file (clution--clution.path clution))))
+
+    (define-key map (kbd "A")
+      (lambda ()
+        (interactive)
+        (let ((path (clution--read-file-name "Add system:" (clution--clution.dir clution) nil t)))
+          (clution--add-system clution path))))
     button))
 
 (defun clution--insert-system-button (system)
@@ -112,7 +131,12 @@
     (define-key map (kbd "<delete>")
       (lambda ()
         (interactive)
-        (clution--remove-system system)))
+        (clution--remove-system system nil)))
+    (define-key map (kbd "D") (kbd "<delete>"))
+    (define-key map (kbd "S-<delete>")
+      (lambda ()
+        (interactive)
+        (clution--remove-system system t)))
     (define-key map (kbd "C-m")
       (lambda ()
         (interactive)
@@ -197,6 +221,20 @@
         (clutex-mode)))
     buffer))
 
+(defun clution--read-file-name (prompt &optional dir default-filename mustmatch initial predicate)
+  (let ((path (read-file-name prompt dir default-filename mustmatch initial predicate)))
+    (while (directory-name-p path)
+      (setq path (read-file-name prompt path default-filename mustmatch initial predicate)))
+    path))
+
+(defun clution--read-new-file-name (prompt &optional dir default-filename initial predicate)
+  (let ((path (read-file-name prompt dir default-filename nil initial predicate)))
+    (while (or (file-exists-p path)
+               (directory-name-p path))
+      (setq path
+            (read-file-name prompt (file-name-directory path) default-filename nil initial predicate)))
+    path))
+
 (defun clution--set-window-height (window n)
   "Make WINDOW N rows height."
   (with-selected-window window
@@ -235,12 +273,14 @@
 
 (defun clution--sync-clutex (clution buffer)
   (with-current-buffer buffer
-    (let ((inhibit-read-only t))
+    (let ((inhibit-read-only t)
+          (point (point)))
       (erase-buffer)
       (cond
        (clution
         (setf default-directory (clution--clution.dir clution))
-        (clution--populate-clutex clution buffer))
+        (clution--populate-clutex clution buffer)
+        (goto-char point))
        (t
         (insert "No clution open.\n"))))))
 
@@ -285,21 +325,25 @@
 (defun clution--make-system (data &optional clution)
   (unless (getf data :path)
     (error "clution: system missing :path component: %S" data))
-  (list
-   :path
-   (expand-file-name
-    (getf data :path)
-    (when clution (clution--clution.dir clution)))
-   :clution clution
-   :startup-dir
-   (when-let ((dir (getf data :startup-dir)))
-     (file-name-as-directory
-      (expand-file-name
-       (getf data :startup-dir)
-       (when clution (clution--clution.dir clution)))))
-   :toplevel (getf data :toplevel)
-   :args (getf data :args)
-   :system-query nil))
+  (let ((res
+         (list
+          :path
+          (expand-file-name
+           (getf data :path)
+           (when clution (clution--clution.dir clution)))
+          :clution clution
+          :startup-dir
+          (when-let ((dir (getf data :startup-dir)))
+            (file-name-as-directory
+             (expand-file-name
+              dir
+              (when clution (clution--clution.dir clution)))))
+          :toplevel (getf data :toplevel)
+          :args (getf data :args)
+          :system-query nil)))
+    (unless clution
+      (setf (getf res :system-query) (clution--system-query res)))
+    res))
 
 (defun clution--make-cuo (data)
   (copy-list data))
@@ -313,39 +357,48 @@
        (buffer-string))))))
 
 (defun clution--insert-clution (clution indent)
-  (insert "(:name " (format "%S" (clution--clution.name clution)) "\n")
-  (when-let ((out-dir (getf clution :output-dir)))
-    (insert-char ?\s (1+ indent))
-    (insert ":output-dir" (format "%S" out-dir) "\n"))
-  (when-let ((tmp-dir (getf clution :tmp-dir)))
-    (insert-char ?\s (1+ indent))
-    (insert ":tmp-dir" (format "%S" tmp-dir) "\n"))
-  (insert-char ?\s (1+ indent))
-  (insert ":systems\n")
-  (insert-char ?\s (1+ indent))
   (insert "(")
-  (let ((systems (clution--clution.systems)))
-    (while systems
-      (clution--insert-system (car systems) (+ indent 2))
-      (setq systems (cdr systems))
-      (when systems
-        (insert "\n")
-        (insert-char ?\s (+ indent 2)))))
-  (insert "))\n"))
+  (let ((first t))
+    (when-let ((out-dir (getf clution :output-dir)))
+      (if first
+          (setq first nil)
+        (insert-char ?\s (1+ indent)))
+      (insert ":output-dir" (format "%S" out-dir) "\n"))
+    (when-let ((tmp-dir (getf clution :tmp-dir)))
+      (if first
+          (setq first nil)
+        (insert-char ?\s (1+ indent)))
+      (insert ":tmp-dir" (format "%S" tmp-dir) "\n"))
+    (if first
+        (setq first nil)
+      (insert-char ?\s (1+ indent)))
+    (insert ":systems")
+    (let ((systems (clution--clution.systems clution)))
+      (if systems
+          (progn
+            (insert "\n")
+            (insert-char ?\s (1+ indent))
+            (insert "(")
+            (while systems
+              (clution--insert-system (car systems) (+ indent 2))
+              (setq systems (cdr systems))
+              (when systems
+                (insert "\n")
+                (insert-char ?\s (+ indent 2))))
+            (insert ")"))
+        (insert " ()"))))
+  (insert ")\n"))
 
 (defun clution--save-clution (clution &optional path)
   (unless path
     (setq path (clution--clution.path clution)))
-  (unless path
-    (error "clution: no save location for clution"))
-
-  (with-temp-file path
-    (clution--insert-clution clution 0)))
+  (when path
+    (with-temp-file path
+      (clution--insert-clution clution 0))))
 
 (defun clution--make-clution (data &optional path)
   (let ((res
          (list
-          :name (getf data :name)
           :path path
           :systems nil
           :output-dir
@@ -385,7 +438,7 @@
   (unless clution
     (setf clution *clution--current-clution*))
 
-  (getf clution :name))
+  (downcase (file-name-base (clution--clution.path clution))))
 
 (defun clution--clution.path (&optional clution)
   (unless clution
@@ -398,6 +451,14 @@
     (setf clution *clution--current-clution*))
 
   (getf clution :systems))
+
+(defun clution--clution.add-system (clution system)
+  (setf (getf clution :systems)
+        (nconc (getf clution :systems) (list system))))
+
+(defun clution--clution.remove-system (clution system)
+  (setf (getf clution :systems)
+        (delete system (getf clution :systems))))
 
 (defun clution--clution.cuo (&optional clution)
   (unless clution
@@ -1135,9 +1196,15 @@ the code obtained from evaluating the given `exit-code-form'."
     (message "clution: no clution open")
     nil)))
 
+(defun clution-create-clution (path)
+  (interactive
+   (list (clution--read-new-file-name "path to new clution: ")))
+  (let ((clution (clution--make-clution (list) path)))
+    (clution--save-clution clution)))
+
 (defun clution-open (path)
   (interactive
-   (list (read-file-name "clution to open: " nil nil t)))
+   (list (clution--read-file-name "clution to open: " nil nil t)))
 
   (when *clution--current-clution*
     (clution-close))
@@ -1212,8 +1279,5 @@ _ALIST is ignored."
 (add-to-list 'auto-mode-alist '("\\.clu$" . clution-file-mode))
 (add-to-list 'auto-mode-alist '("\\.cuo$" . cuo-file-mode))
 (add-hook 'find-file-hook 'clution--find-file-hook)
-
-(add-to-list 'purpose-user-mode-purposes '(clution-output-mode . clution-output))
-(purpose-compile-user-configuration)
 
 (provide 'clution)

@@ -18,12 +18,23 @@
            (format "%S\n"
                    `(cl:progn
                      (cl:prin1
-                      (cl:let ((cl:*standard-output* (cl:make-broadcast-stream)))
-                              ,sexpr))
+                      (cl:let ((cl:*standard-input* (cl:make-broadcast-stream))
+                               (cl:*error-output* (cl:make-broadcast-stream))
+                               (cl:*standard-output* (cl:make-broadcast-stream))
+                               (cl:*trace-output* (cl:make-broadcast-stream))
+                               (cl:*debug-io* (cl:make-broadcast-stream))
+                               (cl:*query-io* (cl:make-broadcast-stream)))
+                              (cl:handler-case (cl:cons :success ,sexpr)
+                                               (cl:error ()
+                                                         (cons :fail nil)))))
+                     (cl:finish-output)
                      ,(clution--exit-form 0))))
           (while (process-live-p lisp-proc)
             (accept-process-output lisp-proc))
-          (car (read-from-string output)))
+          (let ((res (car (read-from-string output))))
+            (unless (eq (car res) :SUCCESS)
+              (error "error during eval"))
+            (cdr res)))
       (when lisp-proc
         (delete-process lisp-proc)))))
 
@@ -552,7 +563,7 @@ of command-line arguments"
 the code obtained from evaluating the given `exit-code-form'."
   (ecase clution-backend
     (t
-     `(uiop:quit ,exit-code-form nil))))
+     `(uiop:quit ,exit-code-form t))))
 
 (defun clution--with-system-searcher (clution lispexpr)
   (let ((names-paths-alist

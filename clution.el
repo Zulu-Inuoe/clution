@@ -123,8 +123,9 @@
         (find-file (clution--system.path system))))
     button))
 
-(defun clution--insert-parent-button (parent)
-  (lexical-let* ((parent parent)
+(defun clution--insert-parent-button (system parent)
+  (lexical-let* ((system system)
+                 (parent parent)
                  (map (make-sparse-keymap))
                  (button
                   (insert-button
@@ -132,8 +133,9 @@
                    'keymap map)))
     button))
 
-(defun clution--insert-child-button (child)
-  (lexical-let* ((child child)
+(defun clution--insert-child-button (system child)
+  (lexical-let* ((system system)
+                 (child child)
                  (map (make-sparse-keymap))
                  (button
                   (insert-button
@@ -167,7 +169,7 @@
       (:PARENT
        (clution--insert-parent-button system node)
        (insert "\n")
-       (clution--insert-nodes (cdr node) (+ indent 2))))))
+       (clution--insert-nodes system (cdr node) (+ indent 2))))))
 
 (defun clution--populate-clutex (clution buffer)
   (with-current-buffer buffer
@@ -177,7 +179,7 @@
       (insert "  ")
       (clution--insert-system-button system)
       (insert "\n")
-      (clution--insert-nodes (clution--system.children system) 4))))
+      (clution--insert-nodes system (clution--system.children system) 4))))
 
 (defun clution--output-buffer (&optional create)
   (let ((buffer (get-buffer "*clution-output*")))
@@ -338,7 +340,7 @@
     (error "clution: no save location for clution"))
 
   (with-temp-file path
-    (clution--insert-clution clution)))
+    (clution--insert-clution clution 0)))
 
 (defun clution--make-clution (data &optional path)
   (let ((res
@@ -946,10 +948,12 @@ the code obtained from evaluating the given `exit-code-form'."
        (clution-close))
       (changed
        (message "Reloading clution (changed %S)" file)
-       (setf *clution--current-clution* (clution--parse-file file)))
+       (setf *clution--current-clution* (clution--parse-file file))
+       (clution--sync-buffers *clution--current-clution*))
       (renamed
        (message "Reloading clution (rename to %S)" file1)
-       (setf *clution--current-clution* (clution--parse-file file1)))
+       (setf *clution--current-clution* (clution--parse-file file1))
+       (clution--sync-buffers *clution--current-clution*))
       (attribute-changed)
       (stopped))))
 

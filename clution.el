@@ -1007,14 +1007,16 @@ the code obtained from evaluating the given `exit-code-form'."
 (defun clution--find-file-hook ()
   (let ((path (buffer-file-name)))
     (cond
+     ((not clution-auto-open)
+      nil)
      (*clution--current-clution*
       nil)
      ((not (file-exists-p path))
       nil)
      ((string-match-p "^clu$" (file-name-extension path))
-      (clution-enter path))
+      (clution-open path))
      ((string-match-p "^asd$" (file-name-extension path))
-      (clution-enter-asd path)))))
+      (clution-open-asd path)))))
 
 (defun clution--file-watch-callback (event)
   (destructuring-bind (descriptor action file &optional file1)
@@ -1056,6 +1058,16 @@ the code obtained from evaluating the given `exit-code-form'."
 (defcustom clution-repl-style 'sly
   "The type of repl to use for clution"
   :type '(choice (const :tag "Use Sly" sly))
+  :group 'clution)
+
+(defcustom clution-auto-open 't
+  "When enabled, clution will automatically open when visiting a .clu or .asd file."
+  :type 'boolean
+  :group 'clution)
+
+(defcustom clution-intrusive-ui 't
+  "When enabled, clution will automatically open the clutex and output buffers when opening a clution."
+  :type 'boolean
   :group 'clution)
 
 (defgroup clutex nil
@@ -1236,7 +1248,8 @@ the code obtained from evaluating the given `exit-code-form'."
    (list (clution--read-file-name "clution to open: " nil nil t)))
 
   (when *clution--current-clution*
-    (clution-close))
+    (let ((clution-intrusive-ui (not clution-intrusive-ui)))
+      (clution-close)))
 
   (let ((path (expand-file-name path)))
     (setf *clution--current-clution*
@@ -1245,6 +1258,10 @@ the code obtained from evaluating the given `exit-code-form'."
           (file-notify-add-watch path '(change) 'clution--file-watch-callback))
 
     (clution--sync-buffers *clution--current-clution*))
+
+  (when clution-intrusive-ui
+    (clution-open-output)
+    (clution-open-clutex))
 
   (run-hooks 'clution-open-hook))
 
@@ -1271,29 +1288,11 @@ the code obtained from evaluating the given `exit-code-form'."
     (setf *clution--current-watch* nil)
     (setf *clution--current-clution* nil)
 
+    (when clution-intrusive-ui
+      (clution-close-clutex)
+      (clution-close-output))
+
     (run-hooks 'clution-close-hook)))
-
-(defun clution-enter (path)
-  (interactive
-   (list nil))
-  (when path
-    (clution-open path))
-  (clution-open-clutex)
-  (clution-open-output))
-
-(defun clution-enter-asd (path)
-  (interactive
-   (list nil))
-  (when path
-    (clution-open-asd path))
-  (clution-open-clutex)
-  (clution-open-output))
-
-(defun clution-exit ()
-  (interactive)
-  (clution-close)
-  (clution-close-clutex)
-  (clution-close-output))
 
 (defun clution-output-default-display-fn (buffer _alist)
   "Display BUFFER to the bottom of the root window.

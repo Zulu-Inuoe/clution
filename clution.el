@@ -1099,13 +1099,22 @@ the code obtained from evaluating the given `exit-code-form'."
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "C-S-b") 'clution-build)
     (define-key map (kbd "<f5>") 'clution-run)
-    (define-key map (kbd "C-<f5>") 'clution-run-no-debug)
-    (define-key map (kbd "<f10>") 'clution-run-step)
+    (define-key map (kbd "<f10>") 'clution-repl)
     map))
 
 (define-minor-mode clution-mode
   "minor mode for editing a clution project."
-  t)
+  nil nil nil
+  :global t
+  :after-hook
+  (progn
+    (cond
+     (clution-mode
+      (add-hook 'find-file-hook 'clution--find-file-hook))
+     (t
+      (clution-exit)
+      (remove-hook 'find-file-hook 'clution--find-file-hook)))))
+
 
 (define-derived-mode clution-file-mode lisp-mode
   "clution-file"
@@ -1336,6 +1345,5 @@ _ALIST is ignored."
 
 (add-to-list 'auto-mode-alist '("\\.clu$" . clution-file-mode))
 (add-to-list 'auto-mode-alist '("\\.cuo$" . cuo-file-mode))
-(add-hook 'find-file-hook 'clution--find-file-hook)
 
 (provide 'clution)

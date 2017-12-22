@@ -265,6 +265,21 @@
   (when-let ((query (ignore-errors (clution--system-query system))))
     (setf (getf system :system-query) query)))
 
+(defun clution--insert-system (system indent)
+  (let ((clution (clution--system.clution system)))
+    (insert "(:path \""
+            (file-relative-name
+             (clution--system.path system)
+             (clution--clution.dir clution))
+            "\"")
+    (when-let ((startup-dir (getf system :startup-dir)))
+      (insert " :startup-dir " (format "%S" startup-dir)))
+    (when-let ((toplevel (getf system :toplevel)))
+      (insert " :toplevel " (format "%S" toplevel)))
+    (when-let ((args (getf system :args)))
+      (insert " :args " (format "%S" args)))
+    (insert ")")))
+
 (defun clution--make-system (data &optional clution)
   (unless (getf data :path)
     (error "clution: system missing :path component: %S" data))
@@ -274,13 +289,13 @@
     (getf data :path)
     (when clution (clution--clution.dir clution)))
    :clution clution
-   :toplevel (getf data :toplevel)
    :startup-dir
    (when-let ((dir (getf data :startup-dir)))
      (file-name-as-directory
       (expand-file-name
        (getf data :startup-dir)
        (when clution (clution--clution.dir clution)))))
+   :toplevel (getf data :toplevel)
    :args (getf data :args)
    :system-query nil))
 
@@ -294,6 +309,36 @@
      (with-temp-buffer
        (insert-file-contents path)
        (buffer-string))))))
+
+(defun clution--insert-clution (clution indent)
+  (insert "(:name " (format "%S" (clution--clution.name clution)) "\n")
+  (when-let ((out-dir (getf clution :output-dir)))
+    (insert-char ?\s (1+ indent))
+    (insert ":output-dir" (format "%S" out-dir) "\n"))
+  (when-let ((tmp-dir (getf clution :tmp-dir)))
+    (insert-char ?\s (1+ indent))
+    (insert ":tmp-dir" (format "%S" tmp-dir) "\n"))
+  (insert-char ?\s (1+ indent))
+  (insert ":systems\n")
+  (insert-char ?\s (1+ indent))
+  (insert "(")
+  (let ((systems (clution--clution.systems)))
+    (while systems
+      (clution--insert-system (car systems) (+ indent 2))
+      (setq systems (cdr systems))
+      (when systems
+        (insert "\n")
+        (insert-char ?\s (+ indent 2)))))
+  (insert "))\n"))
+
+(defun clution--save-clution (clution &optional path)
+  (unless path
+    (setq path (clution--clution.path clution)))
+  (unless path
+    (error "clution: no save location for clution"))
+
+  (with-temp-file path
+    (clution--insert-clution clution)))
 
 (defun clution--make-clution (data &optional path)
   (let ((res

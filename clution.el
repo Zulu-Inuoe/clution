@@ -1185,11 +1185,13 @@ the code obtained from evaluating the given `exit-code-form'."
     (message "clution: busy doing op: '%s'" (getf *clution--current-op* :type)))
    (*clution--current-clution*
     (clution--clear-output)
-    (add-hook 'clution-build-complete-hook 'clution--run-on-build-complete)
+    (if (clution--system.toplevel (clution--clution.selected-system))
+        (add-hook 'clution-build-complete-hook 'clution--run-on-build-complete)
+      (clution--append-output "clution: warning: no toplevel available for '" (clution--system.name (clution--clution.selected-system)) "'"))
     (clution--append-output
-     "Build starting: '" (clution--clution.name *clution--current-clution*)
-     "'\n\n")
-    (clution--kickoff-build (list (clution--clution.selected-system))))
+      "Build starting: '" (clution--clution.name *clution--current-clution*)
+      "'\n\n")
+     (clution--kickoff-build (list (clution--clution.selected-system))))
    (t
     (message "clution: no clution open"))))
 

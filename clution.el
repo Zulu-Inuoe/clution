@@ -1124,7 +1124,7 @@ the code obtained from evaluating the given `exit-code-form'."
      (clution-mode
       (add-hook 'find-file-hook 'clution--find-file-hook))
      (t
-      (clution-exit)
+      (clution-close)
       (remove-hook 'find-file-hook 'clution--find-file-hook)))))
 
 
@@ -1139,7 +1139,7 @@ the code obtained from evaluating the given `exit-code-form'."
 (defvar clution-output-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "q") 'clution-close-output)
-    (define-key map (kbd "Q") 'clution-exit)
+    (define-key map (kbd "Q") 'clution-close)
     map))
 
 (define-derived-mode clution-output-mode compilation-mode
@@ -1151,7 +1151,7 @@ the code obtained from evaluating the given `exit-code-form'."
 (defvar clutex-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "q") 'clution-close-clutex)
-    (define-key map (kbd "Q") 'clution-exit)
+    (define-key map (kbd "Q") 'clution-close)
     map))
 
 (define-derived-mode clutex-mode special-mode "ClutexMode"

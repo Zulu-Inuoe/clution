@@ -885,12 +885,35 @@ the code obtained from evaluating the given `exit-code-form'."
                                                                                        nil)
                                                                    (asdf/lisp-build:compile-file-error ()
                                                                                                        nil)))))))
-
       (lexical-let ((clution clution))
         (lambda (result)
           (let ((default-directory (clution--clution.dir clution)))
             (sly-compilation-finished result nil)
-            (clution--append-output (with-current-buffer (sly-buffer-name :compilation) (buffer-string)))
+            (clution--append-output (with-current-buffer (sly-buffer-name :compilation) (buffer-string)) "\n\n")
+            (clution--build-complete))))
+      "COMMON-LISP-USER")))
+
+(defun clution--repl-slime-compile (systems)
+  (let* ((clution (clution--system.clution (car systems)))
+         (system-names (mapcar 'clution--system.name systems)))
+    (slime-eval-async
+        `(cl:progn
+          ,(clution--with-system-searcher clution
+                                          `(swank::collect-notes
+                                            (cl:lambda ()
+                                                       (cl:dolist (system-name ',system-names)
+                                                                  (cl:handler-case
+                                                                   (swank::with-compilation-hooks ()
+                                                                                                  (asdf:compile-system system-name :force t))
+                                                                   (asdf:compile-error ()
+                                                                                       nil)
+                                                                   (asdf/lisp-build:compile-file-error ()
+                                                                                                       nil)))))))
+      (lexical-let ((clution clution))
+        (lambda (result)
+          (let ((default-directory (clution--clution.dir clution)))
+            (slime-compilation-finished result)
+            (clution--append-output (with-current-buffer (slime-buffer-name :compilation) (buffer-string)) "\n\n")
             (clution--build-complete))))
       "COMMON-LISP-USER")))
 
@@ -908,7 +931,9 @@ the code obtained from evaluating the given `exit-code-form'."
   (let ((system-names (mapcar 'clution--system.name systems)))
     (ecase clution-repl-style
       (sly
-       (clution--repl-sly-compile systems)))))
+       (clution--repl-sly-compile systems))
+      (slime
+       (clution--repl-slime-compile systems)))))
 
 (defun clution--build-complete ()
   (clution--append-output
@@ -993,6 +1018,24 @@ the code obtained from evaluating the given `exit-code-form'."
                       (funcall sly-init-function port-filename coding-system)
                       (clution--repl-form *clution--current-clution*))))
 
+     (setf *clution--repl-active* t))
+    (slime
+     (lexical-let (net-close-hook)
+       (setf net-close-hook
+             (lambda (proc)
+               (remove-hook 'slime-net-process-close-hooks net-close-hook)
+               (clution--repl-exited)))
+       (add-hook 'slime-net-process-close-hooks net-close-hook))
+
+     (slime-start
+      :program (clution--spawn-repl-command)
+      :program-args (clution--spawn-repl-args)
+      :directory (clution--clution.dir)
+      :init (lambda (port-filename coding-system)
+              (format "(progn %s %S)\n\n"
+                      (slime-init-command port-filename coding-system)
+                      (clution--repl-form *clution--current-clution*))))
+
      (setf *clution--repl-active* t))))
 
 (defun clution--repl-sentinel (proc event)
@@ -1057,7 +1100,8 @@ the code obtained from evaluating the given `exit-code-form'."
 
 (defcustom clution-repl-style 'sly
   "The type of repl to use for clution"
-  :type '(choice (const :tag "Use Sly" sly))
+  :type '(choice (const :tag "Use Sly" sly)
+                 (const :tag "Use SLIME" slime))
   :group 'clution)
 
 (defcustom clution-auto-open 't

@@ -1106,6 +1106,8 @@ the code obtained from evaluating the given `exit-code-form'."
       nil)
      ((not (file-exists-p path))
       nil)
+     ((null (file-name-extension path))
+      nil)
      ((string-match-p "^clu$" (file-name-extension path))
       (clution-open path))
      ((string-match-p "^asd$" (file-name-extension path))

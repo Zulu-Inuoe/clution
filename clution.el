@@ -572,7 +572,8 @@
   (getf clution-system :clution))
 
 (defun clution--system.toplevel (clution-system)
-  (getf clution-system :toplevel))
+  (or (getf clution-system :toplevel)
+      "common-lisp-user::main"))
 
 (defun clution--system.startup-dir (clution-system)
   (or (getf clution-system :startup-dir)
@@ -635,22 +636,16 @@
 
 (defun clution--spawn-script-args (system)
   "Arguments to spawn a lisp which will load a script file, then exit."
-  (let ((script-path (clution--system.script-path system))
-        (script-args (clution--system.args system)))
-    (ecase clution-frontend
-      (raw
-       (ecase clution-backend
-         (sbcl
-          `("--noinform" "--disable-ldb" "--lose-on-corruption" "--end-runtime-options"
-            "--noprint" "--disable-debugger" "--load" ,script-path "--eval" "(sb-ext:exit :code 0)"  "--end-toplevel-options"
-            ,@script-args))))
-      (roswell
-       (ecase clution-backend
-         (sbcl
-          `("run" "--lisp" "sbcl-bin" "--"
-            "--noinform" "--disable-ldb" "--lose-on-corruption" "--end-runtime-options"
-            "--noprint" "--disable-debugger" "--load" ,script-path "--eval" "(sb-ext:exit :code 0)"  "--end-toplevel-options"
-            ,@script-args)))))))
+  (ecase clution-frontend
+    (raw
+     (ecase clution-backend
+       (sbcl
+        `("--noinform" "--disable-ldb" "--lose-on-corruption" "--end-runtime-options"
+          "--noprint" "--disable-debugger" "--load" ,(clution--system.script-path system) "--eval" "(sb-ext:exit :code 0)"))))
+    (roswell
+     (ecase clution-backend
+       (sbcl
+        `("run" "--lisp" "sbcl-bin" "--eval" ,(format "%S" (clution--run-form system)) "-q"))))))
 
 (defun clution--spawn-repl-command ()
   "Command to spawn a lisp in a REPL."
@@ -738,7 +733,8 @@ the code obtained from evaluating the given `exit-code-form'."
 
 (defun clution--run-form (system)
   (let ((system-name (clution--system.name system))
-        (toplevel (clution--system.toplevel system)))
+        (toplevel (clution--system.toplevel system))
+        (args (clution--system.args system)))
     (clution--with-system-searcher (clution--system.clution system)
      `(progn
         (let ((*standard-output* (make-broadcast-stream))
@@ -746,7 +742,7 @@ the code obtained from evaluating the given `exit-code-form'."
           (asdf:load-system ,system-name :verbose nil))
 
         (handler-case
-            (let ((ret-code (apply (read-from-string ,toplevel) ,(clution--args-list-form))))
+            (let ((ret-code (apply (read-from-string ,toplevel) ',args)))
               (if (integerp ret-code)
                   ,(clution--exit-form 'ret-code)
                 ,(clution--exit-form 0)))
@@ -790,19 +786,49 @@ the code obtained from evaluating the given `exit-code-form'."
     (buffer-string)))
 
 (defun clution--spawn-script (system sentinel)
-  (let* ((default-directory (clution--system.startup-dir system))
-         (proc
-          (start-process-shell-command
-           "clution-spawn-script"
-           nil
-           (concat
-            "start"
-            " "
-            (clution--spawn-script-command)
-            " "
-            (clution--arglist-to-string
-             (clution--spawn-script-args system))))))
-    (set-process-sentinel proc sentinel)))
+  (ecase clution-run-style
+    (comint
+     (let ((clution-run-buffer (get-buffer-create "*clution-run-buffer*")))
+       (with-current-buffer clution-run-buffer
+         (setq default-directory (clution--system.startup-dir system))
+         (setq buffer-read-only nil)
+         (erase-buffer)
+         (comint-mode))
+       (make-process
+        :name "clution-spawn-script"
+        :buffer clution-run-buffer
+        :command (list* (clution--spawn-script-command) (clution--spawn-script-args system))
+        :connection-type nil
+        :noquery nil
+        :sentinel
+        (lexical-let ((buffer clution-run-buffer)
+                      (sentinel sentinel))
+          (lambda (proc event)
+            (funcall sentinel proc event)
+            (when (eq (process-status proc) 'exit)
+              (with-current-buffer buffer
+                (let ((status (process-exit-status proc)))
+                  (insert "\n\nFinished running. Exited with code "
+                          (number-to-string status)
+                          "(0x" (format "%x" status) ")\n\n"))
+                (setq buffer-read-only t))))))
+       (pop-to-buffer clution-run-buffer)))
+    (term
+     (ecase system-type
+       (windows-nt
+        (let ((default-directory (clution--system.startup-dir system)))
+          (let ((proc
+                 (start-process-shell-command
+                  "clution-spawn-script"
+                  nil
+                  (concat
+                   "start"
+                   " "
+                   (clution--spawn-script-command)
+                   " "
+                   (clution--arglist-to-string
+                    (clution--spawn-script-args system))))))
+            (set-process-sentinel proc sentinel))))))))
 
 (defun clution--clear-output ()
   (when-let ((buffer (clution--output-buffer)))
@@ -984,7 +1010,13 @@ the code obtained from evaluating the given `exit-code-form'."
      script-path)
 
     (clution--append-output "Running script\n\n")
-    (clution--spawn-script system 'clution--run-sentinel)))
+    (let ((success nil))
+      (unwind-protect
+          (progn
+            (clution--spawn-script system 'clution--run-sentinel)
+            (setf success t))
+        (unless success
+          (setq *clution--current-op* nil))))))
 
 (defun clution--do-clean (systems)
   (dolist (system systems)
@@ -1097,6 +1129,11 @@ the code obtained from evaluating the given `exit-code-form'."
   "The backend to use as default for clution."
   :type '(choice (const :tag "sbcl" sbcl))
   :group 'clution)
+
+(defcustom clution-run-style 'comint
+  "How to 'run' a clution."
+  :type '(choice (const :tag "Run process inside emacs window via comint" comint)
+                 (const :tag "Run process in external terminal" term)))
 
 (defcustom clution-repl-style 'sly
   "The type of repl to use for clution"
@@ -1252,7 +1289,7 @@ the code obtained from evaluating the given `exit-code-form'."
     (clution--clear-output)
     (if (clution--system.toplevel (clution--clution.selected-system))
         (add-hook 'clution-build-complete-hook 'clution--run-on-build-complete)
-      (clution--append-output "clution: warning: no toplevel available for '" (clution--system.name (clution--clution.selected-system)) "'"))
+      (clution--append-output "clution: warning: no toplevel available for '" (clution--system.name (clution--clution.selected-system)) "'\n"))
     (clution--append-output
       "Build starting: '" (clution--clution.name *clution--current-clution*)
       "'\n\n")

@@ -228,6 +228,18 @@
             (read-file-name prompt (file-name-directory path) default-filename nil initial predicate)))
     path))
 
+(defun clution--temp-dir ()
+  (file-name-as-directory
+   (expand-file-name
+    "clution"
+    temporary-file-directory)))
+
+(defun clution--temp-asd-clution-dir ()
+  (file-name-as-directory
+   (expand-file-name
+    "asd-clution"
+    (clution--temp-dir))))
+
 (defun clution--set-window-height (window n)
   "Make WINDOW N rows height."
   (with-selected-window window
@@ -382,10 +394,13 @@
         (insert " ()"))))
   (insert ")\n"))
 
-(defun clution--save-clution (clution &optional path)
+(defun clution--save-clution (&optional clution path)
+  (unless clution
+    (setf clution *clution--current-clution*))
   (unless path
     (setq path (clution--clution.path clution)))
   (when path
+    (make-directory (file-name-directory path) t)
     (with-temp-file path
       (clution--insert-clution clution 0))))
 
@@ -419,19 +434,26 @@
     res))
 
 (defun clution--make-asd-clution (asd-path)
-  (let ((res
-         (list
-          :name (file-name-base asd-path)
-          :dir (file-name-directory asd-path)
-          :systems nil
-          :output-dir nil
-          :tmp-dir nil
-          :cuo nil)))
+  (let ((asd-clution-path
+         (expand-file-name
+          (concat (file-name-base asd-path) ".clu")
+          (expand-file-name
+           (file-name-base asd-path)
+           (clution--temp-asd-clution-dir)))))
+    (let ((res
+           (list
+            :path asd-clution-path
+            :systems nil
+            :output-dir nil
+            :tmp-dir nil
+            :cuo nil)))
 
-    (let ((sys (clution--make-system (list :path asd-path) res)))
-      (setf (getf res :systems) (list sys))
-      (setf (getf sys :system-query) (clution--system-query sys)))
-    res))
+      (let ((sys (clution--make-system
+                  (list :path asd-path)
+                  res)))
+        (setf (getf res :systems) (list sys))
+        (setf (getf sys :system-query) (clution--system-query sys)))
+      res)))
 
 (defun clution--parse-file (path)
   (clution--make-clution
@@ -446,8 +468,7 @@
   (unless clution
     (setf clution *clution--current-clution*))
 
-  (or (getf clution :name)
-      (downcase (file-name-base (clution--clution.path clution)))))
+  (downcase (file-name-base (clution--clution.path clution))))
 
 (defun clution--clution.path (&optional clution)
   (unless clution
@@ -546,8 +567,7 @@
   (unless clution
     (setf clution *clution--current-clution*))
 
-  (or (getf clution :dir)
-      (file-name-directory (clution--clution.path clution))))
+  (file-name-directory (clution--clution.path clution)))
 
 (defun clution--system.path (clution-system)
   (getf clution-system :path))
@@ -577,8 +597,6 @@
 
 (defun clution--system.startup-dir (clution-system)
   (or (getf clution-system :startup-dir)
-      (and (clution--system.clution clution-system)
-           (clution--clution.dir (clution--system.clution clution-system)))
       (clution--system.dir clution-system)))
 
 (defun clution--system.args (clution-system)
@@ -1355,6 +1373,11 @@ the code obtained from evaluating the given `exit-code-form'."
 
   (let ((path (expand-file-name path)))
     (setf *clution--current-clution* (clution--make-asd-clution path))
+    (when-let ((clution-path (clution--clution.path *clution--current-clution*)))
+      (clution--save-clution *clution--current-clution*)
+      (when (file-exists-p clution-path)
+        (setf *clution--current-watch* (file-notify-add-watch clution-path '(change) 'clution--file-watch-callback))))
+
     (clution--sync-buffers *clution--current-clution*))
 
   (when clution-intrusive-ui
@@ -1369,8 +1392,9 @@ the code obtained from evaluating the given `exit-code-form'."
     (clution--sync-buffers nil)
 
     (when *clution--current-watch*
-      (file-notify-rm-watch *clution--current-watch*))
-    (setf *clution--current-watch* nil)
+      (file-notify-rm-watch *clution--current-watch*)
+      (setf *clution--current-watch* nil))
+
     (setf *clution--current-clution* nil)
 
     (when clution-intrusive-ui

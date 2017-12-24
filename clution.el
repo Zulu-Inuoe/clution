@@ -1,4 +1,4 @@
-(require 'cl-lib)
+(eval-when-compile (require 'cl-lib))
 
 (defun clution--eval-in-lisp (sexpr)
   (lexical-let* ((lisp-proc nil)
@@ -33,7 +33,7 @@
             (accept-process-output lisp-proc))
           (let ((res (car (read-from-string output))))
             (unless (eq (car res) :SUCCESS)
-              (error "error during eval"))
+              (error "clution: error during eval"))
             (cdr res)))
       (when lisp-proc
         (delete-process lisp-proc)))))
@@ -1047,9 +1047,14 @@ the code obtained from evaluating the given `exit-code-form'."
 
         (delete-directory system-cache-dir t)))))
 
+(defvar *clution--repl-window* nil)
+
 (defun clution--start-repl ()
   (clution--append-output
    "\nClution REPL starting with style '" (format "%s" clution-repl-style) "'\n")
+  (setf *clution--current-op*
+        (list
+         :type 'clution-start-repl))
   (ecase clution-repl-style
     (sly
      (lexical-let (net-close-hook)
@@ -1070,6 +1075,18 @@ the code obtained from evaluating the given `exit-code-form'."
 
      (setf *clution--repl-active* t))
     (slime
+     (when clution-intrusive-ui
+       (setf *clution--repl-window*
+               (display-buffer-in-side-window (get-buffer-create "*clution-repl*")
+                                              '((side . bottom)
+                                                (slot . -1)))))
+
+     (lexical-let (connected-hook)
+       (setf connected-hook
+             (lambda ()
+               (remove-hook 'slime-connected-hook connected-hook)
+               (setf *clution--current-op* nil)))
+       (add-hook 'slime-connected-hook connected-hook t))
      (lexical-let (net-close-hook)
        (setf net-close-hook
              (lambda (proc)
@@ -1081,12 +1098,38 @@ the code obtained from evaluating the given `exit-code-form'."
       :program (clution--spawn-repl-command)
       :program-args (clution--spawn-repl-args)
       :directory (clution--clution.dir)
+      :buffer (get-buffer-create "*clution-repl*")
       :init (lambda (port-filename coding-system)
               (format "(progn %s %S)\n\n"
                       (slime-init-command port-filename coding-system)
                       (clution--repl-form *clution--current-clution*))))
 
      (setf *clution--repl-active* t))))
+
+(defun clution--slime-quit-sentinel (process _message)
+  (cl-assert (process-status process) 'closed)
+  (let* ((inferior (slime-inferior-process process)))
+    (when inferior (delete-process inferior))
+    (slime-net-close process)))
+
+(defun clution--restart-repl ()
+  (ecase clution-repl-style
+    (slime
+     (when (slime-connected-p)
+       (slime-quit-lisp-internal (slime-connection) 'clution--slime-quit-sentinel t))
+     (clution--start-repl))))
+
+(defun clution--end-repl ()
+  (ecase clution-repl-style
+    (slime
+     (when (slime-connected-p)
+       (slime-quit-lisp-internal (slime-connection) 'clution--slime-quit-sentinel t))
+     (when (featurep 'slime-repl)
+       (slime-kill-all-buffers))
+     (when clution-intrusive-ui
+       (when (window-live-p *clution--repl-window*)
+         (delete-window *clution--repl-window*))
+       (setf *clution--repl-window* nil)))))
 
 (defun clution--repl-sentinel (proc event)
   (case (process-status proc)
@@ -1211,8 +1254,9 @@ the code obtained from evaluating the given `exit-code-form'."
 (defvar clution-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "C-S-b") 'clution-build)
-    (define-key map (kbd "<f5>") 'clution-run)
-    (define-key map (kbd "<f10>") 'clution-repl)
+    (define-key map (kbd "<f5>") 'clution-repl)
+    (define-key map (kbd "C-<f5>") 'clution-run)
+    (define-key map (kbd "C-S-<f5>") 'clution-maybe-restart-repl)
     map))
 
 (define-minor-mode clution-mode
@@ -1280,6 +1324,21 @@ the code obtained from evaluating the given `exit-code-form'."
    (t
     (message "clution: no clution open"))))
 
+(defun clution-maybe-restart-repl ()
+  (interactive)
+
+  (cond
+   (*clution--current-op*
+    (message "clution: busy doing op: '%s'" (getf *clution--current-op* :type)))
+   (*clution--repl-active*
+    (clution--clear-output)
+    (clution--append-output
+     "Retarting repl for: '" (clution--clution.name *clution--current-clution*)
+     "'\n\n")
+    (clution--restart-repl))
+   (t
+    (clution-repl))))
+
 (defun clution-build ()
   (interactive)
 
@@ -1305,6 +1364,9 @@ the code obtained from evaluating the given `exit-code-form'."
   (cond
    (*clution--current-op*
     (message "clution: busy doing op: '%s'" (getf *clution--current-op* :type)))
+   (*clution--repl-active*
+    (clution--end-repl)
+    (clution-run))
    (*clution--current-clution*
     (clution--clear-output)
     (if (clution--system.toplevel (clution--clution.selected-system))

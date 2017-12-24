@@ -830,7 +830,9 @@ the code obtained from evaluating the given `exit-code-form'."
                           (number-to-string status)
                           "(0x" (format "%x" status) ")\n\n"))
                 (setq buffer-read-only t))))))
-       (pop-to-buffer clution-run-buffer)))
+       (select-window
+        (display-buffer-in-side-window clution-run-buffer '((side . bottom)
+                                                            (slot . -1))))))
     (term
      (ecase system-type
        (windows-nt
@@ -1106,30 +1108,33 @@ the code obtained from evaluating the given `exit-code-form'."
 
      (setf *clution--repl-active* t))))
 
-(defun clution--slime-quit-sentinel (process _message)
-  (cl-assert (process-status process) 'closed)
-  (let* ((inferior (slime-inferior-process process)))
-    (when inferior (delete-process inferior))
-    (slime-net-close process)))
-
 (defun clution--restart-repl ()
   (ecase clution-repl-style
     (slime
      (when (slime-connected-p)
-       (slime-quit-lisp-internal (slime-connection) 'clution--slime-quit-sentinel t))
-     (clution--start-repl))))
+       (lexical-let ((sentinel
+                      (lambda (proc message)
+                        (cl-assert (process-status proc) 'closed)
+                        (let* ((inferior (slime-inferior-process proc)))
+                          (when inferior (delete-process inferior))
+                          (slime-net-close proc))
+                        (clution--start-repl))))
+         (slime-quit-lisp-internal (slime-connection) sentinel t))))))
 
 (defun clution--end-repl ()
   (ecase clution-repl-style
     (slime
      (when (slime-connected-p)
-       (slime-quit-lisp-internal (slime-connection) 'clution--slime-quit-sentinel t))
-     (when (featurep 'slime-repl)
-       (slime-kill-all-buffers))
-     (when clution-intrusive-ui
-       (when (window-live-p *clution--repl-window*)
-         (delete-window *clution--repl-window*))
-       (setf *clution--repl-window* nil)))))
+       (lexical-let ((sentinel
+                      (lambda (proc message)
+                        (cl-assert (process-status proc) 'closed)
+                        (let* ((inferior (slime-inferior-process proc)))
+                          (when inferior (delete-process inferior))
+                          (slime-net-close proc))
+
+                        (when (featurep 'slime-repl)
+                          (slime-kill-all-buffers)))))
+         (slime-quit-lisp-internal (slime-connection) sentinel t))))))
 
 (defun clution--repl-sentinel (proc event)
   (case (process-status proc)

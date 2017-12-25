@@ -1068,6 +1068,7 @@ the code obtained from evaluating the given `exit-code-form'."
 
 (defun clution--slime-repl-connected-hook-function-advice (orig-fun)
   (advice-remove 'slime-repl-connected-hook-function 'clution--slime-repl-connected-hook-function-advice)
+  (set-window-dedicated-p *clution--repl-window* nil)
   (save-window-excursion
     (funcall orig-fun))
   (clution--display-in-repl-window (slime-repl-buffer)))
@@ -1085,20 +1086,20 @@ the code obtained from evaluating the given `exit-code-form'."
        (cond
         ((featurep 'sly-mrepl)
          (advice-add 'sly-mrepl-on-connection :around 'clution--sly-mrepl-on-connection-advice))
-        (t
+        ((not clution-show-inferior-start)
          (lexical-let (connected-hook)
            (setf connected-hook
              (lambda ()
                (remove-hook 'sly-connected-hook connected-hook)
-               (clution--display-in-repl-window (sly-inferior-lisp-buffer (sly-connection)))))
+               (clution--display-in-repl-window (process-buffer (sly-inferior-process)))))
            (add-hook 'sly-connected-hook connected-hook)))))
 
      (lexical-let (connected-hook)
        (setf connected-hook
              (lambda ()
                (remove-hook 'sly-connected-hook connected-hook)
-               (setf *clution--repl-active* t)
-               (setf *clution--current-op* nil)))
+               (setf *clution--current-op* nil)
+               (clution--repl-started)))
        (add-hook 'sly-connected-hook connected-hook))
      (lexical-let (net-close-hook)
        (setf net-close-hook
@@ -1106,20 +1107,25 @@ the code obtained from evaluating the given `exit-code-form'."
                (remove-hook 'sly-net-process-close-hooks net-close-hook)
                (clution--repl-exited)))
        (add-hook 'sly-net-process-close-hooks net-close-hook))
-     (sly-start
-      :program (clution--spawn-repl-command)
-      :program-args (clution--spawn-repl-args)
-      :directory (clution--clution.dir)
-      :init (lambda (port-filename coding-system)
-              (format "(progn %s %S)\n\n"
-                      (funcall sly-init-function port-filename coding-system)
-                      (clution--repl-form *clution--current-clution*)))))
+     (let ((sly-inferior-buffer
+            (sly-start
+             :program (clution--spawn-repl-command)
+             :program-args (clution--spawn-repl-args)
+             :directory (clution--clution.dir)
+             :init (lambda (port-filename coding-system)
+                     (format "(progn %s %S)\n\n"
+                             (funcall sly-init-function port-filename coding-system)
+                             (clution--repl-form *clution--current-clution*))))))
+
+       (when (and clution-intrusive-ui
+                  clution-show-inferior-start)
+         (clution--display-in-repl-window sly-inferior-buffer))))
     (slime
      (when clution-intrusive-ui
        (cond
         ((featurep 'slime-repl)
          (advice-add 'slime-repl-connected-hook-function :around 'clution--slime-repl-connected-hook-function-advice))
-        (t
+        ((not clution-show-inferior-start)
          (lexical-let (connected-hook)
            (setf connected-hook
              (lambda ()
@@ -1130,8 +1136,8 @@ the code obtained from evaluating the given `exit-code-form'."
        (setf connected-hook
              (lambda ()
                (remove-hook 'slime-connected-hook connected-hook)
-               (setf *clution--repl-active* t)
-               (setf *clution--current-op* nil)))
+               (setf *clution--current-op* nil)
+               (clution--repl-started)))
        (add-hook 'slime-connected-hook connected-hook t))
      (lexical-let (net-close-hook)
        (setf net-close-hook
@@ -1140,20 +1146,23 @@ the code obtained from evaluating the given `exit-code-form'."
                (clution--repl-exited)))
        (add-hook 'slime-net-process-close-hooks net-close-hook))
 
-     (cl-flet ((do-start ()
-                         (slime-start
-                          :program (clution--spawn-repl-command)
-                          :program-args (clution--spawn-repl-args)
-                          :directory (clution--clution.dir)
-                          :buffer (get-buffer-create "*clution-repl*")
-                          :init (lambda (port-filename coding-system)
-                                  (format "(progn %s %S)\n\n"
-                                          (slime-init-command port-filename coding-system)
-                                          (clution--repl-form *clution--current-clution*))))))
-       (if clution-intrusive-ui
-           (save-window-excursion
-             (do-start))
-         (do-start))))))
+     (let ((slime-inferior-buffer
+            (cl-flet ((do-start ()
+                                (slime-start
+                                 :program (clution--spawn-repl-command)
+                                 :program-args (clution--spawn-repl-args)
+                                 :directory (clution--clution.dir)
+                                 :init (lambda (port-filename coding-system)
+                                         (format "(progn %s %S)\n\n"
+                                                 (slime-init-command port-filename coding-system)
+                                                 (clution--repl-form *clution--current-clution*))))))
+              (if clution-intrusive-ui
+                  (save-window-excursion
+                    (do-start))
+                (do-start)))))
+       (when (and clution-intrusive-ui
+                  clution-show-inferior-start)
+         (clution--display-in-repl-window slime-inferior-buffer))))))
 
 (defun clution--restart-repl ()
   (ecase clution-repl-style
@@ -1203,6 +1212,10 @@ the code obtained from evaluating the given `exit-code-form'."
   (case (process-status proc)
     (exit
      (clution--repl-exited))))
+
+(defun clution--repl-started ()
+  (clution--append-output "\nclution-repl: repl started\n")
+  (setf *clution--repl-active* t))
 
 (defun clution--repl-exited ()
   (clution--append-output "\nclution-repl: repl exited\n")
@@ -1264,12 +1277,19 @@ the code obtained from evaluating the given `exit-code-form'."
 (defcustom clution-run-style 'comint
   "How to 'run' a clution."
   :type '(choice (const :tag "Run process inside emacs window via comint" comint)
-                 (const :tag "Run process in external terminal" term)))
+                 (const :tag "Run process in external terminal" term))
+  :group 'clution)
 
 (defcustom clution-repl-style (if (package-installed-p 'sly) 'sly 'slime)
   "The type of repl to use for clution"
   :type '(choice (const :tag "Use Sly" sly)
                  (const :tag "Use SLIME" slime))
+  :group 'clution)
+
+(defcustom clution-show-inferior-start 't
+  "When enabled, the inferior-lisp startup buffer used by Sly/SLIME will be placed in the repl window during startup.
+This only matters when `clution-intrusive-ui' is enabled."
+  :type 'boolean
   :group 'clution)
 
 (defcustom clution-auto-open 't

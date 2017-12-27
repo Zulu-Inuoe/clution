@@ -25,15 +25,15 @@
                                (cl:*debug-io* (cl:make-broadcast-stream))
                                (cl:*query-io* (cl:make-broadcast-stream)))
                               (cl:handler-case (cl:cons :success ,sexpr)
-                                               (cl:error ()
-                                                         (cons :fail nil)))))
+                                               (cl:error (err)
+                                                         (cl:cons :fail (cl:princ-to-string err))))))
                      (cl:finish-output)
                      ,(clution--exit-form 0))))
           (while (process-live-p lisp-proc)
             (accept-process-output lisp-proc))
           (let ((res (car (read-from-string output))))
             (unless (eq (car res) :SUCCESS)
-              (error "clution: error during eval"))
+              (error "clution: error during eval: %S" (cdr res)))
             (cdr res)))
       (when lisp-proc
         (delete-process lisp-proc)))))
@@ -696,7 +696,7 @@ of command-line arguments"
 the code obtained from evaluating the given `exit-code-form'."
   (ecase clution-backend
     (t
-     `(uiop:quit ,exit-code-form t))))
+     `(uiop:quit ,exit-code-form cl:t))))
 
 (defun clution--with-system-searcher (clution lispexpr)
   (let ((names-paths-alist

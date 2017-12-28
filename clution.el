@@ -94,6 +94,16 @@
 (defvar *clution--repl-window* nil)
 (defvar *clution--clutex-window* nil)
 
+(defun clution--clutex-open-file (path)
+  (let ((buffer (find-file-noselect path)))
+    (if-let ((existing-window (get-buffer-window buffer)))
+        (select-window existing-window)
+      (if-let ((mru (get-mru-window))
+               (live (window-live-p mru)))
+          (with-selected-window mru
+            (switch-to-buffer buffer))
+        (switch-to-buffer buffer)))))
+
 (defun clution--insert-clution-button (clution)
   (lexical-let* ((clution clution)
                  (map (make-sparse-keymap))
@@ -105,7 +115,7 @@
       (lambda ()
         (interactive)
         (if-let ((path (clution--clution.path clution)))
-            (find-file path)
+            (clution--clutex-open-file path)
           (message "clution is virtual"))))
     (define-key map (kbd "<double-down-mouse-1>") (kbd "C-m"))
 
@@ -143,7 +153,7 @@
     (define-key map (kbd "C-m")
       (lambda ()
         (interactive)
-        (find-file (clution--system.path system))))
+        (clution--clutex-open-file (clution--system.path system))))
     (define-key map (kbd "<double-down-mouse-1>") (kbd "C-m"))
     button))
 
@@ -168,7 +178,7 @@
     (define-key map (kbd "C-m")
       (lambda ()
         (interactive)
-        (find-file (cl-getf (car child) :PATH))))
+        (clution--clutex-open-file (cl-getf (car child) :PATH))))
     (define-key map (kbd "<double-down-mouse-1>") (kbd "C-m"))
     (define-key map (kbd "<delete>")
       (lambda ()

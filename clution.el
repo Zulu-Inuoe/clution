@@ -62,7 +62,7 @@
                                           (cons (translate-component component :child) nil)))))
                  (cl:loop
                   :for (name . path) :in ',names-paths-alist
-                  :do (asdf:load-asd path)
+                  :do (asdf:load-asd (cl:parse-namestring path))
                   :collect (recurse (asdf:find-system name)))))))
 
 (defun clution--system-query (system)

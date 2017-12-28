@@ -1067,31 +1067,45 @@ the code obtained from evaluating the given `exit-code-form'."
   (clution--display-in-repl-window (sly-mrepl)))
 
 (defun clution--start-sly-repl ()
-  (when clution-intrusive-ui
-    (cond
-     ((featurep 'sly-mrepl)
-      (advice-add 'sly-mrepl-on-connection :around 'clution--sly-mrepl-on-connection-advice))
-     ((not clution-show-inferior-start)
-      (lexical-let (connected-hook)
-        (setf connected-hook
-              (lambda ()
-                (remove-hook 'sly-connected-hook connected-hook)
-                (clution--display-in-repl-window (process-buffer (sly-inferior-process)))))
-        (add-hook 'sly-connected-hook connected-hook)))))
+  (when (and clution-intrusive-ui
+             (featurep 'sly-mrepl))
+    (advice-add 'sly-mrepl-on-connection :around 'clution--sly-mrepl-on-connection-advice))
 
-  (lexical-let (connected-hook)
+  ;;Set up hooks for successful connect and failed start
+  (lexical-let (connected-hook start-failed-hook)
+    ;;Set up hook for when we successfully connect to SLIME
     (setf connected-hook
           (lambda ()
+            (remove-hook 'clution-repl-start-failed-hook start-failed-hook)
             (remove-hook 'sly-connected-hook connected-hook)
-            (setf *clution--current-op* nil)
+
+            (when (and clution-intrusive-ui
+                       (not (featurep 'sly-mrepl))
+                       (not clution-show-inferior-start))
+              ;;Display inferior lisp if we aren't already
+              (clution--display-in-repl-window (process-buffer (sly-inferior-process))))
+
+            ;;Set up hook to detect slime repl disconnecting
+            (lexical-let (net-close-hook)
+              (setf net-close-hook
+                    (lambda (proc)
+                      (remove-hook 'sly-net-process-close-hooks net-close-hook)
+                      (clution--repl-exited)))
+              (add-hook 'sly-net-process-close-hooks net-close-hook))
+
             (clution--repl-started)))
-    (add-hook 'sly-connected-hook connected-hook))
-  (lexical-let (net-close-hook)
-    (setf net-close-hook
-          (lambda (proc)
-            (remove-hook 'sly-net-process-close-hooks net-close-hook)
-            (clution--repl-exited)))
-    (add-hook 'sly-net-process-close-hooks net-close-hook))
+    (add-hook 'sly-connected-hook connected-hook)
+
+    ;;Set up hook for when starting fails
+    (setf start-failed-hook
+          (lambda ()
+            (when (and clution-intrusive-ui
+                       (featurep 'sly-mrepl))
+              (advice-remove 'sly-mrepl-on-connection 'clution--sly-mrepl-on-connection-advice))
+            (remove-hook 'clution-repl-start-failed-hook start-failed-hook)
+            (remove-hook 'sly-connected-hook connected-hook)))
+    (add-hook 'clution-repl-start-failed-hook start-failed-hook))
+
   (let ((sly-inferior-buffer
          (sly-start
           :program (clution--spawn-repl-command)
@@ -1101,6 +1115,35 @@ the code obtained from evaluating the given `exit-code-form'."
                   (format "(progn %s %S)\n\n"
                           (funcall sly-init-function port-filename coding-system)
                           (clution--repl-form *clution--current-clution*))))))
+
+    (lexical-let* ((sly-inferior-process (get-buffer-process sly-inferior-buffer))
+                   (prev-sentinel (process-sentinel sly-inferior-process))
+                   connected-hook)
+
+      ;;Set up a hook for when we successfully connect, since we won't need to detect
+      ;;a failed startup any more
+      (setq connected-hook
+            (lambda ()
+              ;;Remove the hook
+              (remove-hook 'sly-connected-hook connected-hook)
+              ;;Restore the previous sentinel
+              (set-process-sentinel sly-inferior-process prev-sentinel)))
+
+      (add-hook 'sly-connected-hook connected-hook)
+
+      ;;Install a sentinel for when inferior lisp dies before sly is set up
+      ;;This way we can detect a failed start
+      (set-process-sentinel sly-inferior-process
+                            (lambda (proc event)
+                              (cl-case (process-status proc)
+                                (exit
+                                 ;;Remove the hook
+                                 (remove-hook 'sly-connected-hook connected-hook)
+                                 ;;Restore the previous sentinel
+                                 (set-process-sentinel sly-inferior-process prev-sentinel)
+                                 ;;Notify that it failed to start
+                                 (clution--repl-start-failed)))
+                              (funcall prev-sentinel proc event))))
 
     (when (and clution-intrusive-ui
                clution-show-inferior-start)
@@ -1129,6 +1172,7 @@ the code obtained from evaluating the given `exit-code-form'."
             (remove-hook 'slime-connected-hook connected-hook)
 
             (when (and clution-intrusive-ui
+                       (not (featurep 'slime-repl))
                        (not clution-show-inferior-start))
               ;;Display inferior lisp if we aren't already
               (clution--display-in-repl-window (process-buffer (slime-inferior-process))))

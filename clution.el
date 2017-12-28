@@ -1,5 +1,7 @@
 (eval-when-compile (require 'cl-lib))
+(eval-when-compile (require 'cl))
 (eval-when-compile (require 'subr-x))
+(require 'filenotify)
 
 (defun clution--eval-in-lisp (sexpr)
   (lexical-let* ((lisp-proc nil)

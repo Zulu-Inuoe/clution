@@ -213,17 +213,17 @@
       (clution--insert-nodes system (clution--system.children system) 4))))
 
 (defun clution--output-buffer (&optional create)
-  (let ((buffer (get-buffer "*clution-output*")))
+  (let ((buffer (get-buffer " *clution-output*")))
     (when (and (null buffer) create)
-      (setf buffer (generate-new-buffer "*clution-output*"))
+      (setf buffer (generate-new-buffer " *clution-output*"))
       (with-current-buffer buffer
         (clution-output-mode)))
     buffer))
 
 (defun clution--clutex-buffer (&optional create)
-  (let ((buffer (get-buffer "*clution-clutex*")))
+  (let ((buffer (get-buffer " *clution-clutex*")))
     (when (and (null buffer) create)
-      (setf buffer (generate-new-buffer "*clution-clutex*"))
+      (setf buffer (generate-new-buffer " *clution-clutex*"))
       (with-current-buffer buffer
         (clutex-mode)))
     buffer))
@@ -824,7 +824,7 @@ the code obtained from evaluating the given `exit-code-form'."
 (defun clution--spawn-script (system sentinel)
   (cl-ecase clution-run-style
     (comint
-     (let ((clution-run-buffer (get-buffer-create "*clution-run-buffer*")))
+     (let ((clution-run-buffer (get-buffer-create " *clution-run-buffer*")))
        (with-current-buffer clution-run-buffer
          (setq default-directory (clution--system.startup-dir system))
          (setq buffer-read-only nil)

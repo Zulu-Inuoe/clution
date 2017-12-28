@@ -1053,7 +1053,8 @@ the code obtained from evaluating the given `exit-code-form'."
 (defun clution--display-in-repl-window (buffer)
   (unless (window-live-p *clution--repl-window*)
     (setf *clution--repl-window* (display-buffer buffer '(clution-repl-default-display-fn))))
-  (with-selected-window *clution--repl-window*
+  (when (window-live-p *clution--repl-window*)
+    (select-window *clution--repl-window*)
     (set-window-dedicated-p nil nil)
     (set-window-buffer nil buffer)
     (set-window-dedicated-p nil t)
@@ -1327,6 +1328,10 @@ the code obtained from evaluating the given `exit-code-form'."
 
 (defun clution--repl-exited ()
   (clution--append-output "\nclution-repl: repl exited\n")
+  (when clution-intrusive-ui
+    (when (window-live-p *clution--repl-window*)
+      (delete-window *clution--repl-window*))
+    (setf *clution--repl-window* nil))
   (run-hooks 'clution-repl-exited-hook)
   (setf *clution--repl-active* nil))
 

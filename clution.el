@@ -242,17 +242,27 @@
             (read-file-name prompt (file-name-directory path) default-filename nil initial predicate)))
     path))
 
-(defun clution--temp-dir ()
+(defun clution--app-data-dir ()
+  "Directory for storing per-user clution data files."
   (file-name-as-directory
-   (expand-file-name
-    "clution"
-    temporary-file-directory)))
+   (cond
+    ((eq system-type 'windows-nt)
+     (expand-file-name
+      "data"
+      (expand-file-name
+       "clution"
+       (getenv "LOCALAPPDATA"))))
+    (t
+     (expand-file-name
+      "clution"
+      (or (getenv "XDG_DATA_HOME")
+          "~/.local/share/"))))))
 
-(defun clution--temp-asd-clution-dir ()
+(defun clution--asd-clution-dir ()
   (file-name-as-directory
    (expand-file-name
     "asd-clution"
-    (clution--temp-dir))))
+    (clution--app-data-dir))))
 
 (defun clution--set-window-height (window n)
   "Make WINDOW N rows height."
@@ -453,7 +463,7 @@
           (concat (file-name-base asd-path) ".clu")
           (expand-file-name
            (file-name-base asd-path)
-           (clution--temp-asd-clution-dir)))))
+           (clution--asd-clution-dir)))))
     (let ((res
            (list
             :path asd-clution-path

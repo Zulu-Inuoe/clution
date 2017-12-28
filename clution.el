@@ -1068,7 +1068,8 @@ the code obtained from evaluating the given `exit-code-form'."
 
 (defun clution--slime-repl-connected-hook-function-advice (orig-fun)
   (advice-remove 'slime-repl-connected-hook-function 'clution--slime-repl-connected-hook-function-advice)
-  (set-window-dedicated-p *clution--repl-window* nil)
+  (when (window-live-p *clution--repl-window*)
+    (set-window-dedicated-p *clution--repl-window* nil))
   (save-window-excursion
     (funcall orig-fun))
   (clution--display-in-repl-window (slime-repl-buffer)))

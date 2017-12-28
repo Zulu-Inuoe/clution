@@ -1552,6 +1552,9 @@ This only matters when `clution-intrusive-ui' is enabled."
 (defun clution-close ()
   (interactive)
   (when *clution--current-clution*
+    (when *clution--repl-active*
+      (clution-end-repl))
+
     (clution--sync-buffers nil)
 
     (when *clution--current-watch*

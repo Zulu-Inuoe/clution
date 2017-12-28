@@ -151,7 +151,7 @@
                  (map (make-sparse-keymap))
                  (button
                   (insert-button
-                   (concat "> " (getf (car parent) :NAME))
+                   (concat "> " (cl-getf (car parent) :NAME))
                    'keymap map)))
     button))
 
@@ -161,12 +161,12 @@
                  (map (make-sparse-keymap))
                  (button
                   (insert-button
-                   (file-name-nondirectory (getf (car child) :PATH))
+                   (file-name-nondirectory (cl-getf (car child) :PATH))
                    'keymap map)))
     (define-key map (kbd "C-m")
       (lambda ()
         (interactive)
-        (find-file (getf (car child) :PATH))))
+        (find-file (cl-getf (car child) :PATH))))
     (define-key map (kbd "<double-down-mouse-1>") (kbd "C-m"))
     (define-key map (kbd "<delete>")
       (lambda ()
@@ -181,7 +181,7 @@
 (defun clution--insert-nodes (system nodes indent)
   (dolist (node nodes)
     (insert-char ?\s indent)
-    (cl-case (getf (car node) :TYPE)
+    (cl-case (cl-getf (car node) :TYPE)
       (:CHILD
        (clution--insert-child-button system node)
        (insert "\n"))
@@ -312,7 +312,7 @@
 
 (defun clution--update-system-query (system)
   (when-let ((query (ignore-errors (clution--system-query system))))
-    (setf (getf system :system-query) query)))
+    (setf (cl-getf system :system-query) query)))
 
 (defun clution--insert-system (system indent)
   (let ((clution (clution--system.clution system)))
@@ -321,35 +321,35 @@
              (clution--system.path system)
              (clution--clution.dir clution))
             "\"")
-    (when-let ((startup-dir (getf system :startup-dir)))
+    (when-let ((startup-dir (cl-getf system :startup-dir)))
       (insert " :startup-dir " (format "%S" startup-dir)))
-    (when-let ((toplevel (getf system :toplevel)))
+    (when-let ((toplevel (cl-getf system :toplevel)))
       (insert " :toplevel " (format "%S" toplevel)))
-    (when-let ((args (getf system :args)))
+    (when-let ((args (cl-getf system :args)))
       (insert " :args " (format "%S" args)))
     (insert ")")))
 
 (defun clution--make-system (data &optional clution)
-  (unless (getf data :path)
+  (unless (cl-getf data :path)
     (error "clution: system missing :path component: %S" data))
   (let ((res
          (list
           :path
           (expand-file-name
-           (getf data :path)
+           (cl-getf data :path)
            (when clution (clution--clution.dir clution)))
           :clution clution
           :startup-dir
-          (when-let ((dir (getf data :startup-dir)))
+          (when-let ((dir (cl-getf data :startup-dir)))
             (file-name-as-directory
              (expand-file-name
               dir
               (when clution (clution--clution.dir clution)))))
-          :toplevel (getf data :toplevel)
-          :args (getf data :args)
+          :toplevel (cl-getf data :toplevel)
+          :args (cl-getf data :args)
           :system-query nil)))
     (unless clution
-      (setf (getf res :system-query) (clution--system-query res)))
+      (setf (cl-getf res :system-query) (clution--system-query res)))
     res))
 
 (defun clution--make-cuo (data)
@@ -366,12 +366,12 @@
 (defun clution--insert-clution (clution indent)
   (insert "(")
   (let ((first t))
-    (when-let ((out-dir (getf clution :output-dir)))
+    (when-let ((out-dir (cl-getf clution :output-dir)))
       (if first
           (setq first nil)
         (insert-char ?\s (1+ indent)))
       (insert ":output-dir" (format "%S" out-dir) "\n"))
-    (when-let ((tmp-dir (getf clution :tmp-dir)))
+    (when-let ((tmp-dir (cl-getf clution :tmp-dir)))
       (if first
           (setq first nil)
         (insert-char ?\s (1+ indent)))
@@ -412,26 +412,26 @@
           :path path
           :systems nil
           :output-dir
-          (when-let ((dir (getf data :output-dir)))
+          (when-let ((dir (cl-getf data :output-dir)))
             (file-name-as-directory dir))
           :tmp-dir
-          (when-let ((dir (getf data :tmp-dir)))
+          (when-let ((dir (cl-getf data :tmp-dir)))
             (file-name-as-directory dir))
           :cuo nil)))
 
-    (setf (getf res :systems)
+    (setf (cl-getf res :systems)
           (mapcar
            (lambda (sys-data)
              (clution--make-system sys-data res))
-           (getf data :systems)))
+           (cl-getf data :systems)))
 
     (let ((queries (clution--systems-query (clution--clution.systems res))))
       (dolist (sys (clution--clution.systems res))
-        (setf (getf sys :system-query) (car queries))
+        (setf (cl-getf sys :system-query) (car queries))
         (pop queries)))
 
     (when (file-exists-p (clution--clution.cuo-path res))
-      (setf (getf res :cuo) (clution--parse-cuo-file (clution--clution.cuo-path res))))
+      (setf (cl-getf res :cuo) (clution--parse-cuo-file (clution--clution.cuo-path res))))
 
     res))
 
@@ -453,8 +453,8 @@
       (let ((sys (clution--make-system
                   (list :path asd-path)
                   res)))
-        (setf (getf res :systems) (list sys))
-        (setf (getf sys :system-query) (clution--system-query sys)))
+        (setf (cl-getf res :systems) (list sys))
+        (setf (cl-getf sys :system-query) (clution--system-query sys)))
       res)))
 
 (defun clution--parse-file (path)
@@ -476,34 +476,34 @@
   (unless clution
     (setf clution *clution--current-clution*))
 
-  (getf clution :path))
+  (cl-getf clution :path))
 
 (defun clution--clution.systems (&optional clution)
   (unless clution
     (setf clution *clution--current-clution*))
 
-  (getf clution :systems))
+  (cl-getf clution :systems))
 
 (defun clution--clution.add-system (clution system)
-  (setf (getf clution :systems)
-        (nconc (getf clution :systems) (list system))))
+  (setf (cl-getf clution :systems)
+        (nconc (cl-getf clution :systems) (list system))))
 
 (defun clution--clution.remove-system (clution system)
-  (setf (getf clution :systems)
-        (delete system (getf clution :systems))))
+  (setf (cl-getf clution :systems)
+        (delete system (cl-getf clution :systems))))
 
 (defun clution--clution.cuo (&optional clution)
   (unless clution
     (setf clution *clution--current-clution*))
 
-  (getf clution :cuo))
+  (cl-getf clution :cuo))
 
 (defun clution--clution.selected-system (&optional clution)
   (unless clution
     (setf clution *clution--current-clution*))
 
-  (find
-   (or (getf (clution--clution.cuo clution) :selected-system)
+  (cl-find
+   (or (cl-getf (clution--clution.cuo clution) :selected-system)
        (let ((sys (first (clution--clution.systems clution))))
          (if sys (clution--system.name sys) nil)))
    (clution--clution.systems clution)
@@ -514,7 +514,7 @@
   (unless clution
     (setf clution *clution--current-clution*))
 
-  (or (getf clution :output-dir)
+  (or (cl-getf clution :output-dir)
       (file-name-as-directory
        (expand-file-name
         "out"
@@ -524,7 +524,7 @@
   (unless clution
     (setf clution *clution--current-clution*))
 
-  (or (getf clution :tmp-dir)
+  (or (cl-getf clution :tmp-dir)
       (file-name-as-directory
        (expand-file-name
         "tmp"
@@ -572,41 +572,41 @@
   (file-name-directory (clution--clution.path clution)))
 
 (defun clution--system.path (clution-system)
-  (getf clution-system :path))
+  (cl-getf clution-system :path))
 
 (defun clution--system.dir (clution-system)
   (file-name-directory (clution--system.path clution-system)))
 
 (defun clution--system.query (clution-system)
-  (getf clution-system :system-query))
+  (cl-getf clution-system :system-query))
 
 (defun clution--system.children (clution-system)
   (cdr (clution--system.query clution-system)))
 
 (defun clution--system.query-prop (clution-system prop)
-  (getf (car (clution--system.query clution-system)) prop))
+  (cl-getf (car (clution--system.query clution-system)) prop))
 
 (defun clution--system.name (clution-system)
   (or (clution--system.query-prop clution-system :NAME)
       (downcase (file-name-base (clution--system.path clution-system)))))
 
 (defun clution--system.clution (clution-system)
-  (getf clution-system :clution))
+  (cl-getf clution-system :clution))
 
 (defun clution--system.toplevel (clution-system)
-  (or (getf clution-system :toplevel)
+  (or (cl-getf clution-system :toplevel)
       "common-lisp-user::main"))
 
 (defun clution--system.startup-dir (clution-system)
-  (or (getf clution-system :startup-dir)
+  (or (cl-getf clution-system :startup-dir)
       (clution--system.dir clution-system)))
 
 (defun clution--system.type (clution-system)
-  (or (getf clution-system :type)
+  (or (cl-getf clution-system :type)
       :library))
 
 (defun clution--system.args (clution-system)
-  (getf clution-system :args))
+  (cl-getf clution-system :args))
 
 (defun clution--system.cache-dir (clution-system)
   (or (and (clution--system.clution clution-system)
@@ -1529,7 +1529,7 @@ This only matters when `clution-intrusive-ui' is enabled."
 
   (cond
    (*clution--current-op*
-    (message "clution: busy doing op: '%s'" (getf *clution--current-op* :type)))
+    (message "clution: busy doing op: '%s'" (cl-getf *clution--current-op* :type)))
    (*clution--repl-active*
     (message "clution: repl already active"))
    (*clution--current-clution*
@@ -1545,7 +1545,7 @@ This only matters when `clution-intrusive-ui' is enabled."
   (interactive)
   (cond
    (*clution--current-op*
-    (message "clution: busy doing op: '%s'" (getf *clution--current-op* :type)))
+    (message "clution: busy doing op: '%s'" (cl-getf *clution--current-op* :type)))
    (*clution--repl-active*
     (clution--end-repl))
    (t
@@ -1556,7 +1556,7 @@ This only matters when `clution-intrusive-ui' is enabled."
 
   (cond
    (*clution--current-op*
-    (message "clution: busy doing op: '%s'" (getf *clution--current-op* :type)))
+    (message "clution: busy doing op: '%s'" (cl-getf *clution--current-op* :type)))
    (*clution--repl-active*
     (clution--clear-output)
     (clution--append-output
@@ -1571,7 +1571,7 @@ This only matters when `clution-intrusive-ui' is enabled."
 
   (cond
    (*clution--current-op*
-    (message "clution: busy doing op: '%s'" (getf *clution--current-op* :type)))
+    (message "clution: busy doing op: '%s'" (cl-getf *clution--current-op* :type)))
    (*clution--current-clution*
     (clution--clear-output)
     (clution--append-output
@@ -1590,7 +1590,7 @@ This only matters when `clution-intrusive-ui' is enabled."
 
   (cond
    (*clution--current-op*
-    (message "clution: busy doing op: '%s'" (getf *clution--current-op* :type)))
+    (message "clution: busy doing op: '%s'" (cl-getf *clution--current-op* :type)))
    (*clution--repl-active*
     (clution--end-repl)
     (clution-run))
@@ -1611,7 +1611,7 @@ This only matters when `clution-intrusive-ui' is enabled."
 
   (cond
    (*clution--current-op*
-    (message "clution: busy doing op: '%s'" (getf *clution--current-op* :type)))
+    (message "clution: busy doing op: '%s'" (cl-getf *clution--current-op* :type)))
    (*clution--current-clution*
     (clution--clear-output)
     (clution--append-output

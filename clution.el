@@ -1066,6 +1066,46 @@ the code obtained from evaluating the given `exit-code-form'."
     (funcall orig-fun))
   (clution--display-in-repl-window (sly-mrepl)))
 
+(defun clution--start-sly-repl ()
+  (when clution-intrusive-ui
+    (cond
+     ((featurep 'sly-mrepl)
+      (advice-add 'sly-mrepl-on-connection :around 'clution--sly-mrepl-on-connection-advice))
+     ((not clution-show-inferior-start)
+      (lexical-let (connected-hook)
+        (setf connected-hook
+              (lambda ()
+                (remove-hook 'sly-connected-hook connected-hook)
+                (clution--display-in-repl-window (process-buffer (sly-inferior-process)))))
+        (add-hook 'sly-connected-hook connected-hook)))))
+
+  (lexical-let (connected-hook)
+    (setf connected-hook
+          (lambda ()
+            (remove-hook 'sly-connected-hook connected-hook)
+            (setf *clution--current-op* nil)
+            (clution--repl-started)))
+    (add-hook 'sly-connected-hook connected-hook))
+  (lexical-let (net-close-hook)
+    (setf net-close-hook
+          (lambda (proc)
+            (remove-hook 'sly-net-process-close-hooks net-close-hook)
+            (clution--repl-exited)))
+    (add-hook 'sly-net-process-close-hooks net-close-hook))
+  (let ((sly-inferior-buffer
+         (sly-start
+          :program (clution--spawn-repl-command)
+          :program-args (clution--spawn-repl-args)
+          :directory (clution--clution.dir)
+          :init (lambda (port-filename coding-system)
+                  (format "(progn %s %S)\n\n"
+                          (funcall sly-init-function port-filename coding-system)
+                          (clution--repl-form *clution--current-clution*))))))
+
+    (when (and clution-intrusive-ui
+               clution-show-inferior-start)
+      (clution--display-in-repl-window sly-inferior-buffer))))
+
 (defun clution--slime-repl-connected-hook-function-advice (orig-fun)
   (advice-remove 'slime-repl-connected-hook-function 'clution--slime-repl-connected-hook-function-advice)
   (when (window-live-p *clution--repl-window*)
@@ -1074,96 +1114,107 @@ the code obtained from evaluating the given `exit-code-form'."
     (funcall orig-fun))
   (clution--display-in-repl-window (slime-repl-buffer)))
 
+(defun clution--start-slime-repl ()
+  ;;Set up advice for switching to the slime repl after connection
+  (when (and clution-intrusive-ui
+             (featurep 'slime-repl))
+    (advice-add 'slime-repl-connected-hook-function :around 'clution--slime-repl-connected-hook-function-advice))
+
+  ;;Set up hooks for successful connect and failed start
+  (lexical-let (connected-hook start-failed-hook)
+    ;;Set up hook for when we successfully connect to SLIME
+    (setf connected-hook
+          (lambda ()
+            (remove-hook 'clution-repl-start-failed-hook start-failed-hook)
+            (remove-hook 'slime-connected-hook connected-hook)
+
+            (when (and clution-intrusive-ui
+                       (not clution-show-inferior-start))
+              ;;Display inferior lisp if we aren't already
+              (clution--display-in-repl-window (process-buffer (slime-inferior-process))))
+
+            ;;Set up hook to detect slime repl disconnecting
+            (lexical-let (net-close-hook)
+              (setf net-close-hook
+                    (lambda (proc)
+                      (remove-hook 'slime-net-process-close-hooks net-close-hook)
+                      (clution--repl-exited)))
+              (add-hook 'slime-net-process-close-hooks net-close-hook))
+
+            (clution--repl-started)))
+    (add-hook 'slime-connected-hook connected-hook t)
+
+    ;;Set up hook for when starting fails
+    (setf start-failed-hook
+          (lambda ()
+            (when (and clution-intrusive-ui
+                       (featurep 'slime-repl))
+              (advice-remove 'slime-repl-connected-hook-function 'clution--slime-repl-connected-hook-function-advice))
+            (remove-hook 'clution-repl-start-failed-hook start-failed-hook)
+            (remove-hook 'slime-connected-hook connected-hook)))
+    (add-hook 'clution-repl-start-failed-hook start-failed-hook))
+
+  (let ((slime-inferior-buffer
+         (cl-flet ((do-start ()
+                             (slime-start
+                              :program (clution--spawn-repl-command)
+                              :program-args (clution--spawn-repl-args)
+                              :directory (clution--clution.dir)
+                              :init (lambda (port-filename coding-system)
+                                      (format "(progn %s %S)\n\n"
+                                              (slime-init-command port-filename coding-system)
+                                              (clution--repl-form *clution--current-clution*))))))
+           (if clution-intrusive-ui
+               (save-window-excursion
+                 (do-start))
+             (do-start)))))
+    (lexical-let* ((slime-inferior-process (get-buffer-process slime-inferior-buffer))
+                   (prev-sentinel (process-sentinel slime-inferior-process))
+                   connected-hook)
+
+      ;;Set up a hook for when we successfully connect, since we won't need to detect
+      ;;a failed startup any more
+      (setq connected-hook
+            (lambda ()
+              ;;Remove the hook
+              (remove-hook 'slime-connected-hook connected-hook)
+              ;;Restore the previous sentinel
+              (message "Old sentinel vs new: %s %s" prev-sentinel (process-sentinel slime-inferior-process))
+              (set-process-sentinel slime-inferior-process prev-sentinel)))
+
+      (add-hook 'slime-connected-hook connected-hook)
+
+      ;;Install a sentinel for when inferior lisp dies before sly is set up
+      ;;This way we can detect a failed start
+      (set-process-sentinel slime-inferior-process
+                            (lambda (proc event)
+                              (cl-case (process-status proc)
+                                (exit
+                                 ;;Remove the hook
+                                 (remove-hook 'slime-connected-hook connected-hook)
+                                 ;;Restore the previous sentinel
+                                 (set-process-sentinel slime-inferior-process prev-sentinel)
+                                 ;;Notify that it failed to start
+                                 (clution--repl-start-failed)))
+                              (funcall prev-sentinel proc event))))
+
+    ;;If we want to show the inferior buffer during startup, do so
+    (when (and clution-intrusive-ui
+               clution-show-inferior-start)
+      (clution--display-in-repl-window slime-inferior-buffer))))
+
 (defun clution--start-repl ()
   (clution--append-output
-   "\nClution REPL starting with style '" (format "%s" clution-repl-style) "'\n")
+   "\nclution-repl: starting with style '" (format "%s" clution-repl-style) "'\n")
   (setf *clution--current-op*
         (list
          :type 'clution-start-repl))
 
-  (ecase clution-repl-style
+  (cl-ecase clution-repl-style
     (sly
-     (when clution-intrusive-ui
-       (cond
-        ((featurep 'sly-mrepl)
-         (advice-add 'sly-mrepl-on-connection :around 'clution--sly-mrepl-on-connection-advice))
-        ((not clution-show-inferior-start)
-         (lexical-let (connected-hook)
-           (setf connected-hook
-             (lambda ()
-               (remove-hook 'sly-connected-hook connected-hook)
-               (clution--display-in-repl-window (process-buffer (sly-inferior-process)))))
-           (add-hook 'sly-connected-hook connected-hook)))))
-
-     (lexical-let (connected-hook)
-       (setf connected-hook
-             (lambda ()
-               (remove-hook 'sly-connected-hook connected-hook)
-               (setf *clution--current-op* nil)
-               (clution--repl-started)))
-       (add-hook 'sly-connected-hook connected-hook))
-     (lexical-let (net-close-hook)
-       (setf net-close-hook
-             (lambda (proc)
-               (remove-hook 'sly-net-process-close-hooks net-close-hook)
-               (clution--repl-exited)))
-       (add-hook 'sly-net-process-close-hooks net-close-hook))
-     (let ((sly-inferior-buffer
-            (sly-start
-             :program (clution--spawn-repl-command)
-             :program-args (clution--spawn-repl-args)
-             :directory (clution--clution.dir)
-             :init (lambda (port-filename coding-system)
-                     (format "(progn %s %S)\n\n"
-                             (funcall sly-init-function port-filename coding-system)
-                             (clution--repl-form *clution--current-clution*))))))
-
-       (when (and clution-intrusive-ui
-                  clution-show-inferior-start)
-         (clution--display-in-repl-window sly-inferior-buffer))))
+     (clution--start-sly-repl))
     (slime
-     (when clution-intrusive-ui
-       (cond
-        ((featurep 'slime-repl)
-         (advice-add 'slime-repl-connected-hook-function :around 'clution--slime-repl-connected-hook-function-advice))
-        ((not clution-show-inferior-start)
-         (lexical-let (connected-hook)
-           (setf connected-hook
-             (lambda ()
-               (remove-hook 'slime-connected-hook connected-hook)
-               (clution--display-in-repl-window (process-buffer (slime-inferior-process)))))
-           (add-hook 'slime-connected-hook connected-hook)))))
-     (lexical-let (connected-hook)
-       (setf connected-hook
-             (lambda ()
-               (remove-hook 'slime-connected-hook connected-hook)
-               (setf *clution--current-op* nil)
-               (clution--repl-started)))
-       (add-hook 'slime-connected-hook connected-hook t))
-     (lexical-let (net-close-hook)
-       (setf net-close-hook
-             (lambda (proc)
-               (remove-hook 'slime-net-process-close-hooks net-close-hook)
-               (clution--repl-exited)))
-       (add-hook 'slime-net-process-close-hooks net-close-hook))
-
-     (let ((slime-inferior-buffer
-            (cl-flet ((do-start ()
-                                (slime-start
-                                 :program (clution--spawn-repl-command)
-                                 :program-args (clution--spawn-repl-args)
-                                 :directory (clution--clution.dir)
-                                 :init (lambda (port-filename coding-system)
-                                         (format "(progn %s %S)\n\n"
-                                                 (slime-init-command port-filename coding-system)
-                                                 (clution--repl-form *clution--current-clution*))))))
-              (if clution-intrusive-ui
-                  (save-window-excursion
-                    (do-start))
-                (do-start)))))
-       (when (and clution-intrusive-ui
-                  clution-show-inferior-start)
-         (clution--display-in-repl-window slime-inferior-buffer))))))
+     (clution--start-slime-repl))))
 
 (defun clution--restart-repl ()
   (ecase clution-repl-style
@@ -1214,12 +1265,25 @@ the code obtained from evaluating the given `exit-code-form'."
     (exit
      (clution--repl-exited))))
 
+(defun clution--repl-start-failed ()
+  (clution--append-output "\nclution-repl: repl failed to start\n")
+  (when clution-intrusive-ui
+    (when (window-live-p *clution--repl-window*)
+      (delete-window *clution--repl-window*))
+    (setf *clution--repl-window* nil))
+
+  (run-hooks 'clution-repl-start-failed-hook)
+  (setf *clution--current-op* nil))
+
 (defun clution--repl-started ()
   (clution--append-output "\nclution-repl: repl started\n")
+  (run-hooks 'clution-repl-started-hook)
+  (setf *clution--current-op* nil)
   (setf *clution--repl-active* t))
 
 (defun clution--repl-exited ()
   (clution--append-output "\nclution-repl: repl exited\n")
+  (run-hooks 'clution-repl-exited-hook)
   (setf *clution--repl-active* nil))
 
 (defun clution--find-file-hook ()
@@ -1337,6 +1401,15 @@ This only matters when `clution-intrusive-ui' is enabled."
 
 (defvar clution-run-complete-hook nil
   "Hook executed whenever a 'run' operation completes.")
+
+(defvar clution-repl-start-failed-hook nil
+  "Hook executed whenever a 'repl' operation fails to start.")
+
+(defvar clution-repl-started-hook nil
+  "Hook executed whenever a 'repl' operation starts.")
+
+(defvar clution-repl-exited-hook nil
+  "Hook executed whenever a 'repl' operation exits.")
 
 ;;; Modes and maps
 

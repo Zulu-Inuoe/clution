@@ -1,4 +1,5 @@
 (eval-when-compile (require 'cl-lib))
+(eval-when-compile (require 'subr-x))
 
 (defun clution--eval-in-lisp (sexpr)
   (lexical-let* ((lisp-proc nil)
@@ -180,7 +181,7 @@
 (defun clution--insert-nodes (system nodes indent)
   (dolist (node nodes)
     (insert-char ?\s indent)
-    (case (getf (car node) :TYPE)
+    (cl-case (getf (car node) :TYPE)
       (:CHILD
        (clution--insert-child-button system node)
        (insert "\n"))
@@ -600,6 +601,10 @@
   (or (getf clution-system :startup-dir)
       (clution--system.dir clution-system)))
 
+(defun clution--system.type (clution-system)
+  (or (getf clution-system :type)
+      :library))
+
 (defun clution--system.args (clution-system)
   (getf clution-system :args))
 
@@ -624,22 +629,22 @@
 
 (defun clution--spawn-lisp-command ()
   "Command to spawn a lisp in a REL (repl without the print)."
-  (ecase clution-frontend
+  (cl-ecase clution-frontend
     (raw
-     (ecase clution-backend
+     (cl-ecase clution-backend
        (sbcl "sbcl")))
     (roswell "ros")))
 
 (defun clution--spawn-lisp-args ()
   "Arguments to spawn a lisp in a REL (repl without the print)."
-  (ecase clution-frontend
+  (cl-ecase clution-frontend
     (raw
-     (ecase clution-backend
+     (cl-ecase clution-backend
        (sbcl
         '("--noinform" "--disable-ldb" "--lose-on-corruption" "--end-runtime-options"
           "--noprint" "--disable-debugger"))))
     (roswell
-     (ecase clution-backend
+     (cl-ecase clution-backend
        (sbcl
         '("run" "--lisp" "sbcl-bin" "--"
           "--noinform" "--disable-ldb" "--lose-on-corruption" "--end-runtime-options"
@@ -647,54 +652,54 @@
 
 (defun clution--spawn-script-command ()
   "Command to spawn a lisp which will load a script file, then exit."
-  (ecase clution-frontend
+  (cl-ecase clution-frontend
     (raw
-     (ecase clution-backend
+     (cl-ecase clution-backend
        (sbcl "sbcl")))
     (roswell "ros")))
 
 (defun clution--spawn-script-args (system)
   "Arguments to spawn a lisp which will load a script file, then exit."
-  (ecase clution-frontend
+  (cl-ecase clution-frontend
     (raw
-     (ecase clution-backend
+     (cl-ecase clution-backend
        (sbcl
         `("--noinform" "--disable-ldb" "--lose-on-corruption" "--end-runtime-options"
           "--noprint" "--disable-debugger" "--load" ,(clution--system.script-path system) "--eval" "(sb-ext:exit :code 0)"))))
     (roswell
-     (ecase clution-backend
+     (cl-ecase clution-backend
        (sbcl
         `("run" "--lisp" "sbcl-bin" "--eval" ,(format "%S" (clution--run-form system)) "-q"))))))
 
 (defun clution--spawn-repl-command ()
   "Command to spawn a lisp in a REPL."
-  (ecase clution-frontend
+  (cl-ecase clution-frontend
     (raw
-     (ecase clution-backend
+     (cl-ecase clution-backend
        (sbcl "sbcl")))
     (roswell "ros")))
 
 (defun clution--spawn-repl-args ()
   "Arguments to spawn a lisp in a REPL."
-  (ecase clution-frontend
+  (cl-ecase clution-frontend
     (raw
-     (ecase clution-backend
+     (cl-ecase clution-backend
        (sbcl `())))
     (roswell
-     (ecase clution-backend
+     (cl-ecase clution-backend
        (sbcl '("run" "--lisp" "sbcl-bin"))))))
 
 (defun clution--args-list-form ()
   "An SEXP which when evaluated in the lisp backend will evaluate to the list
 of command-line arguments"
-  (ecase clution-backend
+  (cl-ecase clution-backend
     (t
      'uiop:*command-line-arguments*)))
 
 (defun clution--exit-form (exit-code-form)
   "A SEXP which when evaluated in the lisp backend, will exit the program with
 the code obtained from evaluating the given `exit-code-form'."
-  (ecase clution-backend
+  (cl-ecase clution-backend
     (t
      `(uiop:quit ,exit-code-form cl:t))))
 
@@ -805,7 +810,7 @@ the code obtained from evaluating the given `exit-code-form'."
     (buffer-string)))
 
 (defun clution--spawn-script (system sentinel)
-  (ecase clution-run-style
+  (cl-ecase clution-run-style
     (comint
      (let ((clution-run-buffer (get-buffer-create "*clution-run-buffer*")))
        (with-current-buffer clution-run-buffer
@@ -835,7 +840,7 @@ the code obtained from evaluating the given `exit-code-form'."
         (display-buffer-in-side-window clution-run-buffer '((side . bottom)
                                                             (slot . -1))))))
     (term
-     (ecase system-type
+     (cl-ecase system-type
        (windows-nt
         (let ((default-directory (clution--system.startup-dir system)))
           (let ((proc
@@ -873,7 +878,7 @@ the code obtained from evaluating the given `exit-code-form'."
   (clution--append-output string))
 
 (defun clution--build-sentinel (proc event)
-  (case (process-status proc)
+  (cl-case (process-status proc)
     (exit
      (let ((system (car *clution--build-remaining-systems*))
            (status (process-exit-status proc)))
@@ -976,7 +981,7 @@ the code obtained from evaluating the given `exit-code-form'."
          :build-systems systems))
 
   (let ((system-names (mapcar 'clution--system.name systems)))
-    (ecase clution-repl-style
+    (cl-ecase clution-repl-style
       (sly
        (clution--repl-sly-compile systems))
       (slime
@@ -990,7 +995,7 @@ the code obtained from evaluating the given `exit-code-form'."
   (run-hooks 'clution-build-complete-hook))
 
 (defun clution--run-sentinel (proc event)
-  (case (process-status proc)
+  (cl-case (process-status proc)
     (exit
      (let ((status (process-exit-status proc)))
        (clution--append-output "Finished running. Exited with code " (number-to-string status) "(0x" (format "%x" status) ")\n\n"))
@@ -1262,7 +1267,7 @@ the code obtained from evaluating the given `exit-code-form'."
      (clution--start-slime-repl))))
 
 (defun clution--restart-repl ()
-  (ecase clution-repl-style
+  (cl-ecase clution-repl-style
     (sly
      (when (sly-connected-p)
        (sly-quit-lisp-internal
@@ -1283,7 +1288,7 @@ the code obtained from evaluating the given `exit-code-form'."
          (slime-quit-lisp-internal (slime-connection) sentinel t))))))
 
 (defun clution--end-repl ()
-  (ecase clution-repl-style
+  (cl-ecase clution-repl-style
     (sly
      (when (sly-connected-p)
        (sly-quit-lisp t)))
@@ -1306,7 +1311,7 @@ the code obtained from evaluating the given `exit-code-form'."
     (setf *clution--repl-window* nil)))
 
 (defun clution--repl-sentinel (proc event)
-  (case (process-status proc)
+  (cl-case (process-status proc)
     (exit
      (clution--repl-exited))))
 
@@ -1352,9 +1357,9 @@ the code obtained from evaluating the given `exit-code-form'."
       (clution-open-asd path)))))
 
 (defun clution--file-watch-callback (event)
-  (destructuring-bind (descriptor action file &optional file1)
+  (cl-destructuring-bind (descriptor action file &optional file1)
       event
-    (case action
+    (cl-case action
       (created)
       (deleted
        (clution-close))

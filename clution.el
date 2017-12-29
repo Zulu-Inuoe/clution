@@ -305,6 +305,18 @@ Returns the window displaying the buffer"
     "asd-clution"
     (clution--app-data-dir))))
 
+(defun clution--set-file-hidden-flag (path &optional hidden)
+  (unless (eq system-type 'windows-nt)
+    (error "not supported"))
+  (let ((clean-path
+         (cond
+          ((directory-name-p path) (directory-file-name path))
+          (t path)))
+        (flag (if hidden "+h" "-h")))
+    (unless (file-exists-p clean-path)
+      (error "file does not exist: %s" path))
+    (call-process "attrib" nil nil nil flag clean-path)))
+
 (defun clution--set-window-height (window n)
   "Make WINDOW N rows height."
   (with-selected-window window
@@ -424,7 +436,7 @@ Returns the window displaying the buffer"
   (unless cuo
     (setq cuo (clution--clution.cuo *clution--current-clution*)))
   (unless path
-    (setq path (clution--clution.cuo-path)))
+    (setq path (clution--clution.cuo-path (clution--cuo.clution cuo))))
 
   (when path
     (make-directory (file-name-directory path) t)
@@ -452,12 +464,12 @@ Returns the window displaying the buffer"
       (if first
           (setq first nil)
         (insert-char ?\s (1+ indent)))
-      (insert ":output-dir" (format "%S" out-dir) "\n"))
-    (when-let ((tmp-dir (cl-getf clution :tmp-dir)))
+      (insert ":output-dir " (format "%S" out-dir) "\n"))
+    (when-let ((clu-dir (cl-getf clution :clu-dir)))
       (if first
           (setq first nil)
         (insert-char ?\s (1+ indent)))
-      (insert ":tmp-dir" (format "%S" tmp-dir) "\n"))
+      (insert ":clu-dir " (format "%S" clu-dir) "\n"))
     (if first
         (setq first nil)
       (insert-char ?\s (1+ indent)))
@@ -496,8 +508,8 @@ Returns the window displaying the buffer"
           :output-dir
           (when-let ((dir (cl-getf data :output-dir)))
             (file-name-as-directory dir))
-          :tmp-dir
-          (when-let ((dir (cl-getf data :tmp-dir)))
+          :clu-dir
+          (when-let ((dir (cl-getf data :clu-dir)))
             (file-name-as-directory dir))
           :cuo nil)))
 
@@ -532,7 +544,7 @@ Returns the window displaying the buffer"
             :path asd-clution-path
             :systems nil
             :output-dir nil
-            :tmp-dir nil
+            :clu-dir nil
             :cuo nil)))
 
       (let ((sys (clution--make-system
@@ -601,14 +613,14 @@ Returns the window displaying the buffer"
         "out"
         (clution--clution.dir clution)))))
 
-(defun clution--clution.tmp-dir (&optional clution)
+(defun clution--clution.clu-dir (&optional clution)
   (unless clution
     (setf clution *clution--current-clution*))
 
-  (or (cl-getf clution :tmp-dir)
+  (or (cl-getf clution :clu-dir)
       (file-name-as-directory
        (expand-file-name
-        "tmp"
+        ".clu"
         (clution--clution.dir clution)))))
 
 (defun clution--clution.cuo-dir (&optional clution)
@@ -618,7 +630,7 @@ Returns the window displaying the buffer"
   (file-name-as-directory
    (expand-file-name
     "cuo"
-    (clution--clution.tmp-dir clution))))
+    (clution--clution.clu-dir clution))))
 
 (defun clution--clution.cuo-path (&optional clution)
   (unless clution
@@ -635,7 +647,7 @@ Returns the window displaying the buffer"
   (file-name-as-directory
    (expand-file-name
     "script"
-    (clution--clution.tmp-dir clution))))
+    (clution--clution.clu-dir clution))))
 
 (defun clution--clution.asdf-dir (&optional clution)
   (unless clution
@@ -644,7 +656,7 @@ Returns the window displaying the buffer"
   (file-name-as-directory
    (expand-file-name
     "asdf"
-    (clution--clution.tmp-dir clution))))
+    (clution--clution.clu-dir clution))))
 
 (defun clution--clution.dir (&optional clution)
   (unless clution
@@ -1781,13 +1793,19 @@ This only matters when `clution-intrusive-ui' is enabled."
     (let ((clution-intrusive-ui (not clution-intrusive-ui)))
       (clution-close)))
 
-  (let ((path (expand-file-name path)))
-    (setf *clution--current-clution*
-          (clution--parse-file path))
+  (let* ((path (expand-file-name path))
+         (clution (clution--parse-file path)))
+    (let ((clu-dir (clution--clution.clu-dir clution)))
+      (unless (file-exists-p clu-dir)
+        (make-directory clu-dir t)
+        (when (eq system-type 'windows-nt)
+          (clution--set-file-hidden-flag clu-dir t))))
+
+    (setf *clution--current-clution* clution)
     (setf *clution--current-watch*
           (file-notify-add-watch path '(change) 'clution--file-watch-callback))
 
-    (clution--sync-buffers *clution--current-clution*))
+    (clution--sync-buffers clution))
 
   (when clution-intrusive-ui
     (clution-open-output)
@@ -1803,20 +1821,10 @@ This only matters when `clution-intrusive-ui' is enabled."
   (when *clution--current-clution*
     (clution-close))
 
-  (let ((path (expand-file-name path)))
-    (setf *clution--current-clution* (clution--make-asd-clution path))
-    (when-let ((clution-path (clution--clution.path *clution--current-clution*)))
-      (clution--save-clution *clution--current-clution*)
-      (when (file-exists-p clution-path)
-        (setf *clution--current-watch* (file-notify-add-watch clution-path '(change) 'clution--file-watch-callback))))
-
-    (clution--sync-buffers *clution--current-clution*))
-
-  (when clution-intrusive-ui
-    (clution-open-clutex)
-    (clution-open-output))
-
-  (run-hooks 'clution-open-hook))
+  (let* ((path (expand-file-name path))
+         (clution (clution--make-asd-clution path)))
+    (clution--save-clution clution)
+    (clution-open (clution--clution.path clution))))
 
 (defun clution-close ()
   "Close the currently open clution, ending a repl if it is active."

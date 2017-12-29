@@ -4,6 +4,8 @@
 (require 'filenotify)
 
 (defun clution--eval-in-lisp (sexpr)
+  "Spin up a fresh lisp and evaluate `sexpr' in it.
+Synchronously waits for evaluation to complete, and returns the result as an elisp sexpr."
   (lexical-let* ((lisp-proc nil)
                  (output ""))
     (unwind-protect
@@ -42,6 +44,7 @@
         (delete-process lisp-proc)))))
 
 (defun clution--systems-query (systems)
+  "Performs a system query operation on each system in `systems' and returns a list of the results."
   (let ((names-paths-alist
          (mapcar
           (lambda (system)
@@ -69,40 +72,65 @@
                   :collect (recurse (asdf:find-system name)))))))
 
 (defun clution--system-query (system)
+  "Perform a system query operation on `system' and returns the result."
   (car (clution--systems-query (list system))))
 
 (defun clution--add-system (clution path)
+  "Adds the system at `path' to the given `clution'"
   (let ((system (clution--make-system
                  (list :path path))))
     (clution--clution.add-system clution system))
   (clution--save-clution clution))
 
 (defun clution--remove-system (system &optional delete)
+  "Remove `system' from its clution.
+When `delete' is non-nil, delete that system from disk."
   (let ((clution (clution--system.clution system)))
     (unless clution
       (error "system has no parent clution"))
     (clution--clution.remove-system clution system)
     (clution--save-clution clution)))
 
-(defvar *clution--current-clution* nil)
-(defvar *clution--current-watch* nil)
-(defvar *clution--repl-active* nil)
-(defvar *clution--current-op* nil)
+(defvar *clution--current-clution* nil
+  "The currently open clution.")
+
+(defvar *clution--current-watch* nil
+  "file watch as per `file-notify-add-watch' which monitors the current clution's
+file for changes.")
+
+(defvar *clution--repl-active* nil
+  "non-nil if there is a clution repl currently active.")
+
+(defvar *clution--current-op* nil
+  "A plist describing clution's current operation, if any.
+example:
+  (:type clution-build :build-systems (...))")
 
 ;;; Buffer and window manipulation
-(defvar *clution--output-window* nil)
-(defvar *clution--repl-window* nil)
-(defvar *clution--clutex-window* nil)
+(defvar *clution--output-window* nil
+  "The clution output window.")
+
+(defvar *clution--repl-window* nil
+  "The clution repl window.")
+
+(defvar *clution--clutex-window* nil
+  "The clution clutex window.")
 
 (defun clution--clutex-open-file (path)
+  "If `path' points to a file that is currently open in a visible buffer,
+select that window.
+Otherwise, open that file in the most recently used window without selecting it
+see `get-mru-window'
+Returns the window displaying the buffer"
   (let ((buffer (find-file-noselect path)))
     (if-let ((existing-window (get-buffer-window buffer)))
         (select-window existing-window)
       (if-let ((mru (get-mru-window))
                (live (window-live-p mru)))
           (with-selected-window mru
-            (switch-to-buffer buffer))
-        (switch-to-buffer buffer)))))
+            (switch-to-buffer buffer)
+            mru)
+        (get-buffer-window (switch-to-buffer buffer))))))
 
 (defun clution--insert-clution-button (clution)
   (lexical-let* ((clution clution)
@@ -726,6 +754,8 @@ the code obtained from evaluating the given `exit-code-form'."
      `(uiop:quit ,exit-code-form cl:t))))
 
 (defun clution--with-system-searcher (clution lispexpr)
+  "Generates a form that evaluates `lispexpr' with the given `clution''s
+projects visible via ASDF."
   (let ((names-paths-alist
          (mapcar
           (lambda (system)
@@ -767,6 +797,8 @@ the code obtained from evaluating the given `exit-code-form'."
          (clution-do)))))
 
 (defun clution--build-form (system force)
+  "Form to perform a build operation on `system'
+Initializes ASDF and builds the given system."
   `(progn
      (handler-case
          ,(clution--with-system-searcher (clution--system.clution system)
@@ -778,6 +810,8 @@ the code obtained from evaluating the given `exit-code-form'."
      ,(clution--exit-form 0)))
 
 (defun clution--run-form (system)
+  "Form to initialize a lisp to run the given `system'.
+Initializes ASDF and loads the selected system, then calls its toplevel."
   (let ((system-name (clution--system.name system))
         (toplevel (clution--system.toplevel system))
         (args (clution--system.args system)))
@@ -797,15 +831,18 @@ the code obtained from evaluating the given `exit-code-form'."
                  ,(clution--exit-form 1)))))))
 
 (defun clution--repl-form (clution)
-  (let ((system-names (mapcar 'clution--system.name (clution--clution.systems clution))))
+  "Form to initialize a repl to the given clution.
+Initializes ASDF and loads the selected system."
+  (let ((system-name
+         (clution--system.name (clution--clution.selected-system clution))))
     (clution--with-system-searcher clution
      `(progn
         (let ((*standard-output* (make-broadcast-stream))
               (*trace-output* (make-broadcast-stream)))
-          (dolist (system-name ',system-names)
-            (asdf:load-system system-name :verbose nil)))))))
+          (asdf:load-system ,system-name :verbose nil))))))
 
 (defun clution--spawn-lisp (dir filter sentinel)
+  "Spawn a lisp REL (Reat Evaluate Loop)."
   (let* ((default-directory (file-name-directory dir))
          (proc
           (make-process
@@ -819,6 +856,7 @@ the code obtained from evaluating the given `exit-code-form'."
     proc))
 
 (defun clution--arglist-to-string (arglist)
+  "Transforms a list of arguments into a string suitable for windows cmd"
   (with-temp-buffer
     (dolist (s arglist)
       (insert " ^\""
@@ -879,12 +917,14 @@ the code obtained from evaluating the given `exit-code-form'."
             (set-process-sentinel proc sentinel))))))))
 
 (defun clution--clear-output ()
+  "As `erase-buffer', performed in the clution output buffer."
   (when-let ((buffer (clution--output-buffer)))
     (with-current-buffer buffer
       (let ((inhibit-read-only t))
         (erase-buffer)))))
 
 (defun clution--append-output (&rest args)
+  "As `insert', performed in the clution output buffer."
   (when-let ((buffer (clution--output-buffer)))
     (with-current-buffer buffer
       (let ((inhibit-read-only t))
@@ -894,12 +934,15 @@ the code obtained from evaluating the given `exit-code-form'."
       (with-selected-window output-window
         (set-window-point output-window (point-max))))))
 
-(defvar *clution--build-remaining-systems* nil)
+(defvar *clution--build-remaining-systems* nil
+  "The remaining systems in the current build operation.")
 
 (defun clution--build-filter (proc string)
+  "A simple filter to append output from the build to the clution output buffer."
   (clution--append-output string))
 
 (defun clution--build-sentinel (proc event)
+  "A sentinel to monitor the build process."
   (cl-case (process-status proc)
     (exit
      (let ((system (car *clution--build-remaining-systems*))
@@ -917,6 +960,8 @@ the code obtained from evaluating the given `exit-code-form'."
        (clution--continue-build)))))
 
 (defun clution--continue-build ()
+  "Continues a build operation while there are systems left in
+`*clution--build-remaining-systems*'"
   (let ((system (car *clution--build-remaining-systems*)))
     (clution--append-output
      (clution--system.name system) ": build starting"
@@ -930,6 +975,7 @@ the code obtained from evaluating the given `exit-code-form'."
                            (format "%S\n" (clution--build-form system t))))))
 
 (defun clution--kickoff-build (systems)
+  "Starts a build operation for each system in `systems'."
   (clution--append-output "Building systems:\n")
   (dolist (system systems)
     (clution--append-output "  " (clution--system.name system) "\n"))
@@ -944,6 +990,7 @@ the code obtained from evaluating the given `exit-code-form'."
   (clution--continue-build))
 
 (defun clution--repl-sly-compile (systems)
+  "Performs a build operation in a sly repl."
   (let* ((clution (clution--system.clution (car systems)))
          (system-names (mapcar 'clution--system.name systems)))
     (sly-eval-async
@@ -968,6 +1015,7 @@ the code obtained from evaluating the given `exit-code-form'."
       "COMMON-LISP-USER")))
 
 (defun clution--repl-slime-compile (systems)
+  "Performs a build operation in a slime repl."
   (let* ((clution (clution--system.clution (car systems)))
          (system-names (mapcar 'clution--system.name systems)))
     (slime-eval-async
@@ -992,6 +1040,7 @@ the code obtained from evaluating the given `exit-code-form'."
       "COMMON-LISP-USER")))
 
 (defun clution--kickoff-build-in-repl (systems)
+  "Performs a build operation in the currently running repl."
   (clution--append-output "Building systems:\n")
   (dolist (system systems)
     (clution--append-output "  " (clution--system.name system) "\n"))
@@ -1010,6 +1059,7 @@ the code obtained from evaluating the given `exit-code-form'."
        (clution--repl-slime-compile systems)))))
 
 (defun clution--build-complete ()
+  "Called when a buile operation completes."
   (clution--append-output
    "Build Complete: '" (clution--clution.name) "'\n")
 
@@ -1017,6 +1067,7 @@ the code obtained from evaluating the given `exit-code-form'."
   (run-hooks 'clution-build-complete-hook))
 
 (defun clution--run-sentinel (proc event)
+  "Sentinel to monitor a run operation."
   (cl-case (process-status proc)
     (exit
      (let ((status (process-exit-status proc)))
@@ -1024,10 +1075,12 @@ the code obtained from evaluating the given `exit-code-form'."
      (clution--run-complete))))
 
 (defun clution--run-complete ()
+  "Called when a run operation completes."
   (setf *clution--current-op* nil)
   (run-hooks 'clution-run-complete-hook))
 
 (defun clution--run-on-build-complete ()
+  "Hook used to perform a run operation after a build operation completes."
   (remove-hook 'clution-build-complete-hook 'clution--run-on-build-complete)
 
   (unless (clution--system.toplevel (clution--clution.selected-system))
@@ -1067,6 +1120,7 @@ the code obtained from evaluating the given `exit-code-form'."
           (setq *clution--current-op* nil))))))
 
 (defun clution--do-clean (systems)
+  "Perform a clean operation on each system in `systems'"
   (dolist (system systems)
     (let ((system-cache-dir (clution--system.cache-dir system)))
       (when (file-exists-p system-cache-dir)
@@ -1078,6 +1132,7 @@ the code obtained from evaluating the given `exit-code-form'."
         (delete-directory system-cache-dir t)))))
 
 (defun clution--display-in-repl-window (buffer)
+  "Display `buffer' in the clution repl window, and select it."
   (unless (window-live-p *clution--repl-window*)
     (setf *clution--repl-window* (display-buffer buffer '(clution-repl-default-display-fn))))
   (when (window-live-p *clution--repl-window*)
@@ -1089,12 +1144,19 @@ the code obtained from evaluating the given `exit-code-form'."
     (selected-window)))
 
 (defun clution--sly-mrepl-on-connection-advice (orig-fun)
+  "Advice function for sly to pop up the sly-mrepl in the repl window."
+  ;;Remove advice. We only need to do this once.
   (advice-remove 'sly-mrepl-on-connection 'clution--sly-mrepl-on-connection-advice)
+
+  ;;Let sly-mrepl et al initialize
   (save-window-excursion
     (funcall orig-fun))
+
+  ;;Display sly-mrepl in the repl window
   (clution--display-in-repl-window (sly-mrepl)))
 
 (defun clution--start-sly-repl ()
+  "Start a sly style repl."
   (when (and clution-intrusive-ui
              (featurep 'sly-mrepl))
     (advice-add 'sly-mrepl-on-connection :around 'clution--sly-mrepl-on-connection-advice))
@@ -1178,14 +1240,24 @@ the code obtained from evaluating the given `exit-code-form'."
       (clution--display-in-repl-window sly-inferior-buffer))))
 
 (defun clution--slime-repl-connected-hook-function-advice (orig-fun)
+  "Advice function for slime to pop up the slime repl in the repl window."
+  ;;Remove advice. We only need to run once.
   (advice-remove 'slime-repl-connected-hook-function 'clution--slime-repl-connected-hook-function-advice)
+
+  ;;Slime will switch out inferior-lisp for slime-repl
+  ;;undedicate the repl window temporarily so it doesn't fail.
   (when (window-live-p *clution--repl-window*)
     (set-window-dedicated-p *clution--repl-window* nil))
+
+  ;;Allow the repl to spin up etc
   (save-window-excursion
     (funcall orig-fun))
+
+  ;;Show the slime repl in the clution repl window.
   (clution--display-in-repl-window (slime-repl-buffer)))
 
 (defun clution--start-slime-repl ()
+  "Start a slime style repl."
   ;;Set up advice for switching to the slime repl after connection
   (when (and clution-intrusive-ui
              (featurep 'slime-repl))
@@ -1276,6 +1348,7 @@ the code obtained from evaluating the given `exit-code-form'."
       (clution--display-in-repl-window slime-inferior-buffer))))
 
 (defun clution--start-repl ()
+  "Start a new repl, according to style."
   (clution--append-output
    "\nclution-repl: starting with style '" (format "%s" clution-repl-style) "'\n")
   (setf *clution--current-op*
@@ -1289,6 +1362,7 @@ the code obtained from evaluating the given `exit-code-form'."
      (clution--start-slime-repl))))
 
 (defun clution--restart-repl ()
+  "Restart the currently active repl, according to style."
   (cl-ecase clution-repl-style
     (sly
      (when (sly-connected-p)
@@ -1310,6 +1384,7 @@ the code obtained from evaluating the given `exit-code-form'."
          (slime-quit-lisp-internal (slime-connection) sentinel t))))))
 
 (defun clution--end-repl ()
+  "Close the currently active repl, according to style."
   (cl-ecase clution-repl-style
     (sly
      (when (sly-connected-p)
@@ -1325,19 +1400,10 @@ the code obtained from evaluating the given `exit-code-form'."
 
                         (when (featurep 'slime-repl)
                           (slime-kill-all-buffers)))))
-         (slime-quit-lisp-internal (slime-connection) sentinel t)))))
-
-  (when clution-intrusive-ui
-    (when (window-live-p *clution--repl-window*)
-      (delete-window *clution--repl-window*))
-    (setf *clution--repl-window* nil)))
-
-(defun clution--repl-sentinel (proc event)
-  (cl-case (process-status proc)
-    (exit
-     (clution--repl-exited))))
+         (slime-quit-lisp-internal (slime-connection) sentinel t))))))
 
 (defun clution--repl-start-failed ()
+  "Called when the clution repl fails to start."
   (clution--append-output "\nclution-repl: repl failed to start\n")
   (when clution-intrusive-ui
     (when (window-live-p *clution--repl-window*)
@@ -1348,12 +1414,14 @@ the code obtained from evaluating the given `exit-code-form'."
   (setf *clution--current-op* nil))
 
 (defun clution--repl-started ()
+  "Called when the clution repl successfully starts."
   (clution--append-output "\nclution-repl: repl started\n")
   (run-hooks 'clution-repl-started-hook)
   (setf *clution--current-op* nil)
   (setf *clution--repl-active* t))
 
 (defun clution--repl-exited ()
+  "Called when the clution repl exits."
   (clution--append-output "\nclution-repl: repl exited\n")
   (when clution-intrusive-ui
     (when (window-live-p *clution--repl-window*)
@@ -1363,6 +1431,8 @@ the code obtained from evaluating the given `exit-code-form'."
   (setf *clution--repl-active* nil))
 
 (defun clution--find-file-hook ()
+  "Hook for `find-file-hook' which will open .clu or .asd files as current
+clutions if `clution-auto-open' is enabled, and there is not already one active."
   (let ((path (buffer-file-name)))
     (cond
      ((not clution-auto-open)
@@ -1379,6 +1449,8 @@ the code obtained from evaluating the given `exit-code-form'."
       (clution-open-asd path)))))
 
 (defun clution--file-watch-callback (event)
+  "Callback whenever the current clution's file changes.
+See `file-notify-add-watch'"
   (cl-destructuring-bind (descriptor action file &optional file1)
       event
     (cl-case action
@@ -1396,7 +1468,7 @@ the code obtained from evaluating the given `exit-code-form'."
       (attribute-changed)
       (stopped))))
 
-;;;; Publix interface
+;;;; Public interface
 
 ;;; Customization
 
@@ -1547,8 +1619,8 @@ This only matters when `clution-intrusive-ui' is enabled."
 ;;; Functions
 
 (defun clution-repl ()
+  "Activate a repl if there isn't one already active."
   (interactive)
-
   (cond
    (*clution--current-op*
     (message "clution: busy doing op: '%s'" (cl-getf *clution--current-op* :type)))
@@ -1564,6 +1636,7 @@ This only matters when `clution-intrusive-ui' is enabled."
     (message "clution: no clution open"))))
 
 (defun clution-end-repl ()
+  "End the current repl if it's active."
   (interactive)
   (cond
    (*clution--current-op*
@@ -1574,8 +1647,8 @@ This only matters when `clution-intrusive-ui' is enabled."
     (message "clution: no repl active"))))
 
 (defun clution-maybe-restart-repl ()
+  "Restart the repl if it's already active, or start a new one if it isn't."
   (interactive)
-
   (cond
    (*clution--current-op*
     (message "clution: busy doing op: '%s'" (cl-getf *clution--current-op* :type)))
@@ -1589,8 +1662,8 @@ This only matters when `clution-intrusive-ui' is enabled."
     (clution-repl))))
 
 (defun clution-build ()
+  "Perform a 'build' operation on each system in the clution."
   (interactive)
-
   (cond
    (*clution--current-op*
     (message "clution: busy doing op: '%s'" (cl-getf *clution--current-op* :type)))
@@ -1608,8 +1681,8 @@ This only matters when `clution-intrusive-ui' is enabled."
     (message "clution: no clution open"))))
 
 (defun clution-run ()
+  "Perform a 'run' operation on the currently selected system in the clution"
   (interactive)
-
   (cond
    (*clution--current-op*
     (message "clution: busy doing op: '%s'" (cl-getf *clution--current-op* :type)))
@@ -1629,8 +1702,8 @@ This only matters when `clution-intrusive-ui' is enabled."
     (message "clution: no clution open"))))
 
 (defun clution-clean ()
+  "Perform a 'clean' operation on the current clution."
   (interactive)
-
   (cond
    (*clution--current-op*
     (message "clution: busy doing op: '%s'" (cl-getf *clution--current-op* :type)))
@@ -1650,12 +1723,14 @@ This only matters when `clution-intrusive-ui' is enabled."
     nil)))
 
 (defun clution-create-clution (path)
+  "Create a new clution file at `path'"
   (interactive
    (list (clution--read-new-file-name "path to new clution: ")))
   (let ((clution (clution--make-clution (list) path)))
     (clution--save-clution clution)))
 
 (defun clution-open (path)
+  "Opens `path' and sets it as the current clution."
   (interactive
    (list (clution--read-file-name "clution to open: " nil nil t)))
 
@@ -1678,6 +1753,7 @@ This only matters when `clution-intrusive-ui' is enabled."
   (run-hooks 'clution-open-hook))
 
 (defun clution-open-asd (path)
+  "Opens `path' and sets it as the current clution."
   (interactive
    (list (clution--read-file-name "asd to open: " nil nil t)))
 
@@ -1700,6 +1776,7 @@ This only matters when `clution-intrusive-ui' is enabled."
   (run-hooks 'clution-open-hook))
 
 (defun clution-close ()
+  "Close the currently open clution, ending a repl if it is active."
   (interactive)
   (when *clution--current-clution*
     (when *clution--repl-active*
@@ -1732,6 +1809,7 @@ _ALIST is ignored."
   (display-buffer-in-side-window buffer '((side . bottom) (slot . -1))))
 
 (defun clution-open-output ()
+  "Opens the clution output window."
   (interactive)
   (unless (window-live-p *clution--output-window*)
     (let ((buffer (clution--output-buffer t)))
@@ -1741,6 +1819,7 @@ _ALIST is ignored."
     (clution--init-output-window *clution--output-window*)))
 
 (defun clution-close-output ()
+  "Closes the clution output window."
   (interactive)
   (when (window-live-p *clution--output-window*)
     (delete-window *clution--output-window*))

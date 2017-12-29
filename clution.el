@@ -2,6 +2,7 @@
 (eval-when-compile (require 'cl))
 (eval-when-compile (require 'subr-x))
 (require 'filenotify)
+(require 'pp)
 
 (defun clution--eval-in-lisp (sexpr)
   "Spin up a fresh lisp and evaluate `sexpr' in it.
@@ -81,6 +82,14 @@ Synchronously waits for evaluation to complete, and returns the result as an eli
                  (list :path path))))
     (clution--clution.add-system clution system))
   (clution--save-clution clution))
+
+(defun clution--select-system (system)
+  "Selects the given `system' in the clution.
+See `clution--clution.selected-system'"
+  (let* ((clution (clution--system.clution system))
+         (cuo (clution--clution.cuo clution)))
+    (setf (getf cuo :selected-system) (clution--system.name system))
+    (clution--save-cuo cuo (clution--cuo.path cuo))))
 
 (defun clution--remove-system (system &optional delete)
   "Remove `system' from its clution.
@@ -173,6 +182,10 @@ Returns the window displaying the buffer"
       (lambda ()
         (interactive)
         (clution--remove-system system nil)))
+    (define-key map (kbd "S")
+      (lambda ()
+        (interactive)
+        (clution--select-system system)))
     (define-key map (kbd "D") (kbd "<delete>"))
     (define-key map (kbd "S-<delete>")
       (lambda ()
@@ -402,8 +415,27 @@ Returns the window displaying the buffer"
       (setf (cl-getf res :system-query) (clution--system-query res)))
     res))
 
+(defun clution--insert-cuo (cuo indent)
+  (insert "(")
+  (insert ":selected-system " (format "%S" (clution--cuo.selected-system cuo)))
+  (insert ")"))
+
+(defun clution--save-cuo (&optional cuo path)
+  (unless cuo
+    (setq cuo (clution--clution.cuo *clution--current-clution*)))
+  (unless path
+    (setq path (clution--clution.cuo-path)))
+
+  (when path
+    (make-directory (file-name-directory path) t)
+    (with-temp-file path
+      (clution--insert-cuo cuo 0))))
+
 (defun clution--make-cuo (data)
-  (copy-list data))
+  (let ((res
+         (list
+          :selected-system (cl-getf data :selected-system))))
+    res))
 
 (defun clution--parse-cuo-file (path)
   (clution--make-cuo
@@ -480,9 +512,12 @@ Returns the window displaying the buffer"
         (setf (cl-getf sys :system-query) (car queries))
         (pop queries)))
 
-    (when (file-exists-p (clution--clution.cuo-path res))
-      (setf (cl-getf res :cuo) (clution--parse-cuo-file (clution--clution.cuo-path res))))
+    (if (file-exists-p (clution--clution.cuo-path res))
+        (setf (cl-getf res :cuo) (clution--parse-cuo-file (clution--clution.cuo-path res)))
+      (setf (cl-getf res :cuo) (clution--make-cuo nil)))
 
+    (let ((cuo (cl-getf res :cuo)))
+      (setf (getf cuo :clution) res))
     res))
 
 (defun clution--make-asd-clution (asd-path)
@@ -552,13 +587,9 @@ Returns the window displaying the buffer"
   (unless clution
     (setf clution *clution--current-clution*))
 
-  (cl-find
-   (or (cl-getf (clution--clution.cuo clution) :selected-system)
-       (let ((sys (first (clution--clution.systems clution))))
-         (if sys (clution--system.name sys) nil)))
-   (clution--clution.systems clution)
-   :key 'clution--system.name
-   :test 'string-equal))
+  (if-let ((system-name (clution--cuo.selected-system (clution--clution.cuo clution))))
+      (cl-find system-name (clution--clution.systems clution) :key 'clution--system.name :test 'string-equal)
+    (first (clution--clution.systems clution))))
 
 (defun clution--clution.output-dir (&optional clution)
   (unless clution
@@ -620,6 +651,18 @@ Returns the window displaying the buffer"
     (setf clution *clution--current-clution*))
 
   (file-name-directory (clution--clution.path clution)))
+
+(defun clution--cuo.path (cuo)
+  (clution--clution.cuo-path (clution--cuo.clution cuo)))
+
+(defun clution--cuo.dir (cuo)
+  (file-name-directory (clution--cuo.path cuo)))
+
+(defun clution--cuo.clution (cuo)
+  (cl-getf cuo :clution))
+
+(defun clution--cuo.selected-system (cuo)
+  (cl-getf cuo :selected-system))
 
 (defun clution--system.path (clution-system)
   (cl-getf clution-system :path))

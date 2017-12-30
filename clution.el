@@ -332,9 +332,17 @@ Returns the window displaying the buffer"
      clution-app-data-dir))))
 
 (defun clution--asd-clution-dir ()
+  "Directory where clution stores asd-generated clution files."
   (file-name-as-directory
    (expand-file-name
     "asd-clution"
+    (clution--app-data-dir))))
+
+(defun clution--qlfile-bundle-dir ()
+  "Directory where clution stores qlfile-generated bundles for clutions."
+  (file-name-as-directory
+   (expand-file-name
+    "qlfile-bundle"
     (clution--app-data-dir))))
 
 (defun clution--set-file-hidden-flag (path &optional hidden)
@@ -700,6 +708,17 @@ Returns the window displaying the buffer"
    (concat (clution--clution.name clution) ".cuo")
    (clution--clution.cuo-dir clution)))
 
+(defun clution--clution.qlfile-libs-dir (&optional clution)
+  "Directory where a clution's qlfile libraries are stored."
+  (unless clution
+    (setf clution *clution--current-clution*))
+
+  (or (cl-getf clution :qlfile-libs-dir)
+      (file-name-as-directory
+       (expand-file-name
+        "qlfile-libs"
+        (clution--clution.clu-dir clution)))))
+
 (defun clution--clution.script-dir (&optional clution)
   (unless clution
     (setf clution *clution--current-clution*))
@@ -919,6 +938,18 @@ the code obtained from evaluating the given `exit-code-form'."
               (cl:push (cl:function clution-system-searcher)
                        asdf:*system-definition-search-functions*))))
 
+(defun clution--install-qlfile-libs-searcher-form (clution)
+  (let ((dir-search-str (concat
+                         (clution--clution.qlfile-libs-dir nil)
+                         "**/*.asd")))
+    `(cl:flet ((clution-qlfile-libs-searcher (system-name)
+                                      (cl:loop
+                                       :for path :in (cl:directory ,dir-search-str)
+                                       :if (cl:string-equal system-name (cl:pathname-name path))
+                                       :return path)))
+              (cl:push (cl:function clution-qlfile-libs-searcher)
+                       asdf:*system-definition-search-functions*))))
+
 (defun clution--install-output-translations-form (clution)
   (let ((system-output-translations
          (mapcar
@@ -945,17 +976,20 @@ the code obtained from evaluating the given `exit-code-form'."
 (defun clution--build-form (system force)
   "Form to perform a build operation on `system'
 Initializes ASDF and builds the given system."
-  `(cl:progn
-     (cl:handler-case
-      (cl:progn
-       ,(clution--install-system-searcher-form (clution--system.clution system))
-       ,(clution--install-output-translations-form (clution--system.clution system))
-       (cl:let* ((cl:*standard-input* (cl:make-string-input-stream "")))
-                (asdf:compile-system ,(clution--system.name system) :force ,force :verbose nil))
-       ,(clution--exit-form 0))
-      (cl:error (e)
-                (cl:format cl:*error-output* "error during build:~%~T~A" e)
-                ,(clution--exit-form 1)))))
+  (let ((clution (clution--system.clution system)))
+    `(cl:progn
+      (cl:handler-case
+       (cl:progn
+        ,(when (clution--clution.qlfile-p clution)
+           (clution--install-qlfile-libs-searcher-form clution))
+        ,(clution--install-system-searcher-form clution)
+        ,(clution--install-output-translations-form clution)
+        (cl:let* ((cl:*standard-input* (cl:make-string-input-stream "")))
+                 (asdf:compile-system ,(clution--system.name system) :force ,force :verbose nil))
+        ,(clution--exit-form 0))
+       (cl:error (e)
+                 (cl:format cl:*error-output* "error during build:~%~T~A" e)
+                 ,(clution--exit-form 1))))))
 
 (defun clution--run-form (system)
   "Form to initialize a lisp to run the given `system'.
@@ -965,6 +999,8 @@ Initializes ASDF and loads the selected system, then calls its toplevel."
         (toplevel (clution--system.toplevel system))
         (args (clution--system.args system)))
     `(cl:progn
+      ,(when (clution--clution.qlfile-p clution)
+         (clution--install-qlfile-libs-searcher-form clution))
       ,(clution--install-system-searcher-form clution)
       ,(clution--install-output-translations-form clution)
        (cl:let ((cl:*standard-output* (cl:make-broadcast-stream))
@@ -986,6 +1022,8 @@ Initializes ASDF and loads the selected system."
   (let* ((system (clution--clution.selected-system clution))
          (system-name (clution--system.name system)))
     `(cl:progn
+      ,(when (clution--clution.qlfile-p clution)
+         (clution--install-qlfile-libs-searcher-form clution))
       ,(clution--install-system-searcher-form clution)
       ,(clution--install-output-translations-form clution)
       (asdf:load-system ,system-name :verbose nil))))
@@ -1069,19 +1107,32 @@ Initializes ASDF and loads the selected system."
       (with-selected-window output-window
         (set-window-point output-window (point-max))))))
 
-(defun clution--do-qlot-sync (clution &optional cont)
-  (clution--append-output "Installing and updating qlot packages for '" (clution--clution.name clution) "'\n")
+(defun clution--do-qlfile-sync (clution &optional cont)
+  "Synchronizes the clution's qlfile-libs to its qlfile."
+  (clution--append-output "Installing and updating qlfile packages for '" (clution--clution.name clution) "'\n")
 
   (clution--append-output "\nInstalling qlot packages...\n\n")
 
   (setf *clution--current-op*
         (list
          :type 'clution-qlot-install))
-  (lexical-let ((clution clution)
-                (cont cont))
+
+  (lexical-let* ((clution clution)
+                 (cont cont)
+                 (bundle-dir (file-name-as-directory
+                              (expand-file-name
+                               (clution--clution.name clution)
+                               (clution--qlfile-bundle-dir))))
+                 (bundle-qlfile
+                  (expand-file-name "qlfile" bundle-dir))
+                 (qlfile-libs-dir (clution--clution.qlfile-libs-dir)))
+    (unless (file-exists-p bundle-dir)
+      (make-directory bundle-dir t))
+    (copy-file (clution--clution.qlfile-path clution) bundle-qlfile t)
+
     (clution--async-proc
      :command (append (clution--qlot-command) '("install"))
-     :dir (clution--clution.qlfile-dir clution)
+     :dir bundle-dir
      :filter
      (lambda (proc string)
        (clution--append-output string))
@@ -1093,14 +1144,23 @@ Initializes ASDF and loads the selected system."
               :type 'clution-qlot-update))
        (clution--async-proc
         :command (append (clution--qlot-command) '("update"))
-        :dir (clution--clution.qlfile-dir clution)
+        :dir bundle-dir
         :filter
         (lambda (proc string)
           (clution--append-output string))
         :cont
         (lambda (code)
-          (clution--append-output "\nUpdate complete\n")
+          (clution--append-output "\nUpdate complete\n\n")
           (setf *clution--current-op* nil)
+          (when (file-exists-p qlfile-libs-dir)
+            (delete-directory qlfile-libs-dir t nil))
+          (make-directory qlfile-libs-dir t)
+
+          (dolist (dist-dir (directory-files (expand-file-name "quicklisp/dists/" bundle-dir) t "[^.|..|quicklisp]"))
+            (dolist (package-dir (directory-files (expand-file-name "software/" dist-dir) t "[^.|..]"))
+              (copy-directory
+               (file-name-as-directory package-dir)
+               qlfile-libs-dir t t nil)))
           (when cont
             (funcall cont))))))))
 
@@ -1108,11 +1168,6 @@ Initializes ASDF and loads the selected system."
   (clution--append-output
    "Build starting: '" (clution--clution.name (clution--system.clution (first systems)))
    "'\n\n")
-
-  (when (and (clution--clution.qlfile-p (clution--system.clution (first systems)))
-             (not (eq clution-frontend 'roswell)))
-    (clution--append-output "clution: error: Using a qlfile is only supported when using the roswell frontend\n")
-    (error "Using a qlfile is only supported when using the roswell frontend"))
 
   (clution--append-output "Building systems:\n")
   (dolist (system systems)
@@ -1134,15 +1189,11 @@ Initializes ASDF and loads the selected system."
                 (lambda (system)
                   (clution--append-output
                    (clution--system.name system) ": build starting\n\n")
-                  (let* ((command (if (clution--clution.qlfile-p clution)
-                                      (append (clution--qlot-command) '("exec") (list (clution--spawn-lisp-command)) (clution--spawn-lisp-args))
-                                    (list* (clution--spawn-lisp-command) (clution--spawn-lisp-args))))
+                  (let* ((command (list* (clution--spawn-lisp-command) (clution--spawn-lisp-args)))
                          (proc
                           (clution--async-proc
                            :command command
-                           :dir (or (and (clution--clution.qlfile-p clution)
-                                         (clution--clution.qlfile-dir clution))
-                                    (clution--system.startup-dir system))
+                           :dir (clution--system.startup-dir system)
                            :filter
                            (lambda (proc string)
                              (clution--append-output string))
@@ -1257,10 +1308,6 @@ Initializes ASDF and loads the selected system."
    "' selected system: '" (clution--system.name (clution--clution.selected-system clution))
    "' toplevel: '" (clution--system.toplevel (clution--clution.selected-system clution))
    "'\n\n")
-
-  (when (and (clution--clution.qlfile-p (clution--system.clution (first systems))))
-    (clution--append-output "clution: error: running when using a qlfile is currently not supported\n")
-    (error "running when using a qlfile is currently not supported"))
 
   (setf *clution--current-op*
         (list
@@ -1388,16 +1435,12 @@ Initializes ASDF and loads the selected system."
             (remove-hook 'sly-connected-hook connected-hook)))
     (add-hook 'clution-repl-start-failed-hook start-failed-hook))
 
-  (let* ((command (if (clution--clution.qlfile-p clution)
-                      (append (clution--qlot-command) '("exec") (list (clution--spawn-repl-command)) (clution--spawn-repl-args))
-                    (list* (clution--spawn-repl-command) (clution--spawn-repl-args))))
+  (let* ((command (list* (clution--spawn-repl-command) (clution--spawn-repl-args)))
          (sly-inferior-buffer
           (sly-start
            :program (first command)
            :program-args (rest command)
-           :directory (or (and (clution--clution.qlfile-p clution)
-                               (clution--clution.qlfile-dir clution))
-                          (clution--clution.dir clution))
+           :directory (clution--clution.dir clution)
            :init
            (lexical-let ((clution clution))
              (lambda (port-filename coding-system)
@@ -1497,17 +1540,13 @@ Initializes ASDF and loads the selected system."
             (remove-hook 'slime-connected-hook connected-hook)))
     (add-hook 'clution-repl-start-failed-hook start-failed-hook))
 
-  (let* ((command (if (clution--clution.qlfile-p clution)
-                      (append (clution--qlot-command) '("exec") (list (clution--spawn-repl-command)) (clution--spawn-repl-args))
-                    (list* (clution--spawn-repl-command) (clution--spawn-repl-args))))
+  (let* ((command (list* (clution--spawn-repl-command) (clution--spawn-repl-args)))
          (slime-inferior-buffer
           (cl-flet ((do-start ()
                               (slime-start
                                :program (first command)
                                :program-args (rest command)
-                               :directory (or (and (clution--clution.qlfile-p clution)
-                                                   (clution--clution.qlfile-dir clution))
-                                              (clution--clution.dir clution))
+                               :directory (clution--clution.dir clution)
                                :init (lambda (port-filename coding-system)
                                        (format "(progn %s %S)\n\n"
                                                (slime-init-command port-filename coding-system)
@@ -1555,11 +1594,6 @@ Initializes ASDF and loads the selected system."
   "Start a new repl, according to style."
   (clution--append-output
    "\nclution-repl: starting with style '" (format "%s" clution-repl-style) "'\n")
-
-  (when (and (clution--clution.qlfile-p clution)
-             (not (eq clution-frontend 'roswell)))
-    (clution--append-output "\nclution: error: Using a qlfile is only supported when using the roswell frontend\n")
-    (error "Using a qlfile is only supported when using the roswell frontend"))
 
   (setf *clution--current-op*
         (list
@@ -1882,8 +1916,8 @@ generated clution files."
    (t
     (clution-repl))))
 
-(defun clution-qlot-sync ()
-  "Install & update qlot packages for the current clution."
+(defun clution-qlfile-sync ()
+  "Install & update qlfile packages for the current clution."
   (interactive)
   (cond
    ((not *clution--current-clution*)
@@ -1894,7 +1928,7 @@ generated clution files."
     (message "clution: clution has no qlfile defined"))
    (t
     (clution--clear-output)
-    (clution--do-qlot-sync *clution--current-clution*))))
+    (clution--do-qlfile-sync *clution--current-clution*))))
 
 (defun clution-build ()
   "Perform a 'build' operation on each system in the clution."
@@ -1907,11 +1941,12 @@ generated clution files."
    (*clution--repl-active*
     (clution--clear-output)
     (clution--kickoff-build-in-repl (clution--clution.systems)))
-   ((clution--clution.qlfile-p)
+   ((and (clution--clution.qlfile-p)
+         (not (file-exists-p (clution--clution.qlfile-libs-dir))))
     (clution--clear-output)
-    ;;Sync qlot before build
+    ;;Sync qlfile before build
     (lexical-let ((clution *clution--current-clution*))
-      (clution--do-qlot-sync
+      (clution--do-qlfile-sync
        clution
        (lambda ()
          (clution--do-build (clution--clution.systems clution))))))
@@ -1931,10 +1966,11 @@ generated clution files."
     ;;Kill repl and try again
     (clution--end-repl)
     (clution-run))
-   ((clution--clution.qlfile-p)
+   ((and (clution--clution.qlfile-p)
+         (not (file-exists-p (clution--clution.qlfile-libs-dir))))
     (clution--clear-output)
     (lexical-let ((clution *clution--current-clution*))
-      (clution--do-qlot-sync
+      (clution--do-qlfile-sync
        clution
        (lambda ()
          (clution--do-build

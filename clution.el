@@ -315,17 +315,21 @@ Returns the window displaying the buffer"
   "Directory for storing per-user clution data files."
   (file-name-as-directory
    (cond
-    ((eq system-type 'windows-nt)
-     (expand-file-name
-      "data"
-      (expand-file-name
-       "clution"
-       (getenv "LOCALAPPDATA"))))
+    ((eq clution-app-data-dir 'auto)
+     (cond
+      ((eq system-type 'windows-nt)
+       (expand-file-name
+        "data"
+        (expand-file-name
+         "clution"
+         (getenv "LOCALAPPDATA"))))
+      (t
+       (expand-file-name
+        "clution"
+        (or (getenv "XDG_DATA_HOME")
+            "~/.local/share/")))))
     (t
-     (expand-file-name
-      "clution"
-      (or (getenv "XDG_DATA_HOME")
-          "~/.local/share/"))))))
+     clution-app-data-dir))))
 
 (defun clution--asd-clution-dir ()
   (file-name-as-directory
@@ -1695,6 +1699,13 @@ This only matters when `clution-intrusive-ui' is enabled."
 (defcustom clution-intrusive-ui 't
   "When enabled, clution will automatically open the clutex and output buffers when opening a clution."
   :type 'boolean
+  :group 'clution)
+
+(defcustom clution-app-data-dir 'auto
+  "Directory to use for clution application data, such as automatically
+generated clution files."
+  :type '(choice (const :tag "Automatically determine by following standard conventions for the platform." auto)
+                 (directory :tag "Use a custom directory"))
   :group 'clution)
 
 (defgroup clutex nil

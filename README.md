@@ -108,6 +108,53 @@ in a neotree style tree.
 
 Open and close it via `M-x clution-clutex-open` and `M-x clution-clutex-close`
 
+## clution file
+
+At its simplest, a clution file lists the systems thare together form your
+project.
+
+It's possible to create a new clution file via `M-x clution-create-clution`
+This will prompt for a file path, and create an empty clution file.
+You may then open the clution `M-x clution-open`, and add systems to it by
+pressing `A` while hovering over it in the [clutex](#clutex) buffer.
+To remove a system, move the emacs point over the system name and press `D`.
+
+However for many small projects, where only one system is relevant, see the
+section on [asd clutions](#asd clution).
+
+## asd clution
+
+For convenience in single-system projects, clution is able to operate on single
+asd files (`M-x clution-open-asd`).
+When opening said file, clution will automatically generate a trivial clution
+file & directories in its application data directory.
+Otherwise, all normal operations, such as opening a repl, building, and
+[clutex](#clutex) are available.
+
+When a [qlfile](#qlfiles) is present in the same
+directory as the asd, clution will use that file.
+
+## qlfiles
+
+[qlot qlfiles](https://github.com/fukamachi/qlot) are supported, though with
+slightly different behavior from qlot.
+When a clution specifies a qlfile, the operation `M-x clution-qlfile-sync` will
+synchronize clutex's libraries with the qfile. By default, the packages are
+stored in the clution's [clu directory](#clu directory).
+When performing any operation on a clution, all packages in qlfile packages
+will be visible to ASDF.
+
+When naming conflicts occur, priority is given to clution-local systems over
+qlfile systems, followed by any user-configured systems.
+
+## clu directory
+
+clution stores project-local files, such as compiled fasls,
+[qlfile packages](#qlfiles), and generated scripts used for building, in its clu
+directory.
+By default, this directory is named `.clu`, and is in the same directory as the
+clution file itself.
+
 ## Rationale
 In the current Common Lisp ecosystem, there exist fantastic tools that allow
 developers to work and collaborate like never before.

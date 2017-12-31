@@ -215,8 +215,7 @@ Returns the window displaying the buffer"
     (define-key map (kbd "A")
       (lambda ()
         (interactive)
-        (let ((path (clution--read-file-name "Add system:" (clution--clution.dir clution) nil t)))
-          (clution--add-system clution path))))
+        (clution--query-and-add-system clution)))
     button))
 
 (defun clution--insert-qlfile-button (clution)
@@ -1869,6 +1868,11 @@ See `file-notify-add-watch'"
       (attribute-changed)
       (stopped))))
 
+(defun clution--query-and-add-system (clution)
+  (interactive)
+  (let ((path (clution--read-file-name "Add system:" (clution--clution.dir) nil t)))
+    (clution--add-system *clution--current-clution* path)))
+
 ;;;; Public interface
 
 ;;; Customization
@@ -2016,6 +2020,14 @@ generated clution files."
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "q") 'clution-close-clutex)
     (define-key map (kbd "Q") 'clution-close)
+    (define-key map (kbd "A")
+      (lambda ()
+        (interactive)
+        (cond
+         ((not *clution--current-clution*)
+          (message "clution: no clution open"))
+         (t
+          (clution--query-and-add-system *clution--current-clution*)))))
     map))
 
 (define-derived-mode clutex-mode special-mode "ClutexMode"

@@ -137,7 +137,8 @@ See `clution--clution.selected-system'"
   (let* ((clution (clution--system.clution system))
          (cuo (clution--clution.cuo clution)))
     (setf (getf cuo :selected-system) (clution--system.name system))
-    (clution--save-cuo cuo (clution--cuo.path cuo))))
+    (clution--save-cuo cuo (clution--cuo.path cuo)))
+  (clution--sync-buffers *clution--current-clution*))
 
 (defun clution--remove-system (system &optional delete)
   "Remove `system' from its clution.
@@ -246,14 +247,13 @@ Returns the window displaying the buffer"
                   (insert-button
                    (file-name-nondirectory (clution--system.path system))
                    'keymap map)))
-    (define-key fold-map (kbd "TAB")
+    (define-key fold-map (kbd "C-m")
       (lambda ()
         (interactive)
         (clution--toggle-system-fold system)))
-    (define-key fold-map (kbd "<mouse-1>")
-      (lambda ()
-        (interactive)
-        (clution--toggle-system-fold system)))
+    (define-key fold-map (kbd "TAB") (kbd "C-m"))
+    (define-key fold-map (kbd "<mouse-1>") (kbd "C-m"))
+
     (define-key map (kbd "TAB")
       (lambda ()
         (interactive)
@@ -293,22 +293,18 @@ Returns the window displaying the buffer"
                   (insert-button
                    (clution--node.name parent)
                    'keymap map)))
-    (define-key fold-map (kbd "TAB")
+    (define-key fold-map (kbd "C-m")
       (lambda ()
         (interactive)
         (clution--toggle-parent-fold parent)))
-    (define-key fold-map (kbd "<mouse-1>")
+    (define-key fold-map (kbd "TAB") (kbd "C-m"))
+    (define-key fold-map (kbd "<mouse-1>") (kbd "C-m"))
+
+    (define-key map (kbd "C-m")
       (lambda ()
         (interactive)
         (clution--toggle-parent-fold parent)))
-    (define-key map (kbd "TAB")
-      (lambda ()
-        (interactive)
-        (clution--toggle-parent-fold parent)))
-    (define-key map (kbd "<mouse-1>")
-      (lambda ()
-        (interactive)
-        (clution--toggle-parent-fold parent)))
+    (define-key map (kbd "TAB") (kbd "C-m"))
     button))
 
 (defun clution--insert-child-button (child)
@@ -357,6 +353,8 @@ Returns the window displaying the buffer"
     (dolist (system (clution--clution.systems clution))
       (insert "  ")
       (clution--insert-system-button system)
+      (when (eq (clution--clution.selected-system clution) system)
+        (insert " <>"))
       (insert "\n")
       (let ((node (clution--system.query-node system)))
         (unless (clution--node.folded node)
@@ -475,17 +473,21 @@ Returns the window displaying the buffer"
         (insert "No clution open.\n"))))))
 
 (defun clution--sync-clutex (clution buffer)
-  (with-current-buffer buffer
-    (let ((inhibit-read-only t)
-          (point (point)))
-      (erase-buffer)
-      (cond
-       (clution
-        (setf default-directory (clution--clution.dir clution))
-        (clution--populate-clutex clution buffer)
-        (goto-char point))
-       (t
-        (insert "No clution open.\n"))))))
+  (let ((restoring-point-column
+         (when (eq (window-buffer) buffer)
+           (cons (window-point) (current-column)))))
+    (with-current-buffer buffer
+      (let ((inhibit-read-only t))
+        (erase-buffer)
+        (cond
+         (clution
+          (setf default-directory (clution--clution.dir clution))
+          (clution--populate-clutex clution buffer))
+         (t
+          (insert "No clution open.\n")))))
+    (when restoring-point-column
+      (set-window-point (selected-window) (car restoring-point-column))
+      (move-to-column (cdr restoring-point-column)))))
 
 (defun clution--sync-buffers (clution)
   (when-let ((buffer (clution--output-buffer)))

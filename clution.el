@@ -505,18 +505,20 @@ Returns the window displaying the buffer"
           (setq first nil)
         (insert-char ?\s (1+ indent)))
       (insert ":output-dir "
-              (format "%S" (file-relative-name
-                            out-dir
-                            (clution--clution.dir clution)))
+              (format "%S" (file-name-as-directory
+                            (file-relative-name
+                             out-dir
+                             (clution--clution.dir clution))))
               "\n"))
     (when-let ((clu-dir (cl-getf clution :clu-dir)))
       (if first
           (setq first nil)
         (insert-char ?\s (1+ indent)))
       (insert ":clu-dir "
-              (format "%S" (file-relative-name
-                            clu-dir
-                            (clution--clution.dir clution)))
+              (format "%S" (file-name-as-directory
+                            (file-relative-name
+                             clu-dir
+                             (clution--clution.dir clution))))
               "\n"))
     (when-let ((qlfile (cl-getf clution :qlfile)))
       (if first
@@ -526,6 +528,16 @@ Returns the window displaying the buffer"
               (format "%S" (file-relative-name
                             qlfile
                             (clution--clution.dir clution)))
+              "\n"))
+    (when-let ((qlfile-libs-dir (cl-getf clution :qlfile-libs-dir)))
+      (if first
+          (setq first nil)
+        (insert-char ?\s (1+ indent)))
+      (insert ":qlfile-libs-dir "
+              (format "%S" (file-name-as-directory
+                            (file-relative-name
+                             qlfile-libs-dir
+                             (clution--clution.dir clution))))
               "\n"))
     (if first
         (setq first nil)
@@ -571,7 +583,10 @@ Returns the window displaying the buffer"
           :cuo nil
           :qlfile
           (when-let ((qlfile (cl-getf data :qlfile)))
-            qlfile))))
+            qlfile)
+          :qlfile-libs-dir
+          (when-let ((qlfile-libs-dir (cl-getf data :qlfile-libs-dir)))
+            (file-name-as-directory qlfile-libs-dir)))))
 
     (setf (cl-getf res :systems)
           (mapcar
@@ -613,7 +628,8 @@ Returns the window displaying the buffer"
             :qlfile
             (when-let ((qlfile (expand-file-name "qlfile" asd-dir))
                        (exists (file-exists-p qlfile)))
-              qlfile))))
+              qlfile)
+            :qlfile-libs-dir nil)))
 
       (let ((sys (clution--make-system
                   (list :path asd-path)

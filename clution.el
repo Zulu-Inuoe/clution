@@ -81,24 +81,44 @@ Synchronously waits for evaluation to complete, and returns the result as an eli
              (clution--system.name system)
              (clution--system.path system)))
           systems)))
-    (clution--eval-in-lisp
-     `(cl:labels ((translate-component (component type)
-                                       (cl:list
-                                        :name (asdf:component-name component)
-                                        :path (cl:namestring (asdf:component-pathname component))
-                                        :type type))
-                  (recurse (component)
-                           (cl:etypecase component
-                                         (asdf:parent-component
-                                          (cl:cons
-                                           (translate-component component :parent)
-                                           (cl:mapcar #'recurse (asdf:component-children component))))
-                                         (asdf:child-component
-                                          (cons (translate-component component :child) nil)))))
-                 (cl:loop
-                  :for (name . path) :in ',names-paths-alist
-                  :do (asdf:load-asd (cl:parse-namestring path))
-                  :collect (recurse (asdf:find-system name)))))))
+    (let ((query-results
+           (clution--eval-in-lisp
+            `(cl:labels ((translate-component (component type)
+                                              (cl:list
+                                               :name (asdf:component-name component)
+                                               :path (cl:namestring (asdf:component-pathname component))
+                                               :type type))
+                         (recurse (component)
+                                  (cl:etypecase component
+                                                (asdf:parent-component
+                                                 (cl:cons
+                                                  (translate-component component :parent)
+                                                  (cl:mapcar #'recurse (asdf:component-children component))))
+                                                (asdf:child-component
+                                                 (cons (translate-component component :child) nil)))))
+                        (cl:loop
+                         :for (name . path) :in ',names-paths-alist
+                         :do (asdf:load-asd (cl:parse-namestring path))
+                         :collect (recurse (asdf:find-system name)))))))
+      (cl-mapcar
+       (lambda (query-result system)
+         (cl-labels ((translate-node (node parent system)
+                                     (let* ((data (car node))
+                                            (children (cdr node))
+                                            (translated
+                                             (list
+                                              :system system
+                                              :parent parent
+                                              :name (cl-getf data :NAME)
+                                              :path (cl-getf data :PATH)
+                                              :type (cl-getf data :TYPE)
+                                              :children nil)))
+                                       (setf (cl-getf translated :children)
+                                             (mapcar (lambda (c) (translate-node c parent system)) children))
+                                       translated)))
+           (translate-node query-result nil system)))
+       query-results
+       systems))))
 
 (defun clution--system-query (system)
   "Perform a system query operation on `system' and returns the result."
@@ -169,6 +189,15 @@ Returns the window displaying the buffer"
             mru)
         (get-buffer-window (switch-to-buffer buffer))))))
 
+(defun clution--toggle-system-fold (system)
+  (let ((node (clution--system.query-node system)))
+    (clution--node.set-folded node (not (clution--node.folded node))))
+  (clution--sync-buffers *clution--current-clution*))
+
+(defun clution--toggle-parent-fold (parent)
+  (clution--node.set-folded parent (not (clution--node.folded parent)))
+  (clution--sync-buffers *clution--current-clution*))
+
 (defun clution--insert-clution-button (clution)
   (lexical-let* ((clution clution)
                  (map (make-sparse-keymap))
@@ -179,9 +208,7 @@ Returns the window displaying the buffer"
     (define-key map (kbd "C-m")
       (lambda ()
         (interactive)
-        (if-let ((path (clution--clution.path clution)))
-            (clution--clutex-open-file path)
-          (message "clution is virtual"))))
+        (clution--clutex-open-file  (clution--clution.path clution))))
     (define-key map (kbd "<double-down-mouse-1>") (kbd "C-m"))
 
     (define-key map (kbd "A")
@@ -191,21 +218,47 @@ Returns the window displaying the buffer"
           (clution--add-system clution path))))
     button))
 
-(defun clution--insert-system-button (system)
-  (lexical-let* ((system system)
+(defun clution--insert-qlfile-button (clution)
+  (lexical-let* ((clution clution)
                  (map (make-sparse-keymap))
                  (button
                   (insert-button
-                   (concat "> " (file-name-nondirectory (clution--system.path system)))
+                   (file-name-nondirectory (clution--clution.qlfile-path clution))
                    'keymap map)))
+    (define-key map (kbd "C-m")
+      (lambda ()
+        (interactive)
+        (clution--clutex-open-file (clution--clution.qlfile-path clution))))
+    (define-key map (kbd "<double-down-mouse-1>") (kbd "C-m"))
+    button))
+
+(defun clution--insert-system-button (system)
+  (lexical-let* ((system system)
+                 (node (clution--system.query-node system))
+                 (fold-map (make-sparse-keymap))
+                 (fold-button
+                  (insert-button
+                   (if (clution--node.folded node) ">" "v")
+                   'keymap fold-map))
+                 (empty-space (insert " "))
+                 (map (make-sparse-keymap))
+                 (button
+                  (insert-button
+                   (file-name-nondirectory (clution--system.path system))
+                   'keymap map)))
+    (define-key fold-map (kbd "TAB")
+      (lambda ()
+        (interactive)
+        (clution--toggle-system-fold system)))
+    (define-key fold-map (kbd "<mouse-1>")
+      (lambda ()
+        (interactive)
+        (clution--toggle-system-fold system)))
     (define-key map (kbd "TAB")
       (lambda ()
         (interactive)
         (clution--toggle-system-fold system)))
-    (define-key map (kbd "<mouse-1>")
-      (lambda ()
-        (interactive)
-        (clution--toggle-system-fold system)))
+    (define-key map (kbd "<mouse-1>") nil)
     (define-key map (kbd "<delete>")
       (lambda ()
         (interactive)
@@ -226,28 +279,49 @@ Returns the window displaying the buffer"
     (define-key map (kbd "<double-down-mouse-1>") (kbd "C-m"))
     button))
 
-(defun clution--insert-parent-button (system parent)
-  (lexical-let* ((system system)
-                 (parent parent)
+(defun clution--insert-parent-button (parent)
+  (lexical-let* ((parent parent)
+                 (fold-map
+                  (make-sparse-keymap))
+                 (fold-button
+                  (insert-button
+                   (if (clution--node.folded parent) ">" "v")
+                   'keymap fold-map))
                  (map (make-sparse-keymap))
+                 (blank-space (insert " "))
                  (button
                   (insert-button
-                   (concat "> " (cl-getf (car parent) :NAME))
+                   (clution--node.name parent)
                    'keymap map)))
+    (define-key fold-map (kbd "TAB")
+      (lambda ()
+        (interactive)
+        (clution--toggle-parent-fold parent)))
+    (define-key fold-map (kbd "<mouse-1>")
+      (lambda ()
+        (interactive)
+        (clution--toggle-parent-fold parent)))
+    (define-key map (kbd "TAB")
+      (lambda ()
+        (interactive)
+        (clution--toggle-parent-fold parent)))
+    (define-key map (kbd "<mouse-1>")
+      (lambda ()
+        (interactive)
+        (clution--toggle-parent-fold parent)))
     button))
 
-(defun clution--insert-child-button (system child)
-  (lexical-let* ((system system)
-                 (child child)
+(defun clution--insert-child-button (child)
+  (lexical-let* ((child child)
                  (map (make-sparse-keymap))
                  (button
                   (insert-button
-                   (file-name-nondirectory (cl-getf (car child) :PATH))
+                   (file-name-nondirectory (clution--node.path child))
                    'keymap map)))
     (define-key map (kbd "C-m")
       (lambda ()
         (interactive)
-        (clution--clutex-open-file (cl-getf (car child) :PATH))))
+        (clution--clutex-open-file (clution--node.path child))))
     (define-key map (kbd "<double-down-mouse-1>") (kbd "C-m"))
     (define-key map (kbd "<delete>")
       (lambda ()
@@ -259,27 +333,34 @@ Returns the window displaying the buffer"
         (clution--remove-child child t)))
     button))
 
-(defun clution--insert-nodes (system nodes indent)
+(defun clution--insert-nodes (nodes indent)
   (dolist (node nodes)
     (insert-char ?\s indent)
-    (cl-case (cl-getf (car node) :TYPE)
+    (cl-case  (clution--node.type node)
       (:CHILD
-       (clution--insert-child-button system node)
+       (clution--insert-child-button node)
        (insert "\n"))
       (:PARENT
-       (clution--insert-parent-button system node)
+       (clution--insert-parent-button node)
        (insert "\n")
-       (clution--insert-nodes system (cdr node) (+ indent 2))))))
+       (unless (clution--node.folded node)
+         (clution--insert-nodes (clution--node.children node) (+ indent 2)))))))
 
 (defun clution--populate-clutex (clution buffer)
   (with-current-buffer buffer
     (clution--insert-clution-button clution)
     (insert "\n")
+    (when (clution--clution.qlfile-p clution)
+      (insert "  ")
+      (clution--insert-qlfile-button clution)
+      (insert "\n"))
     (dolist (system (clution--clution.systems clution))
       (insert "  ")
       (clution--insert-system-button system)
       (insert "\n")
-      (clution--insert-nodes system (clution--system.children system) 4))))
+      (let ((node (clution--system.query-node system)))
+        (unless (clution--node.folded node)
+          (clution--insert-nodes (clution--node.children node) 4))))))
 
 (defun clution--output-buffer (&optional create)
   (let ((buffer (get-buffer " *clution-output*")))
@@ -427,7 +508,7 @@ Returns the window displaying the buffer"
 
 (defun clution--update-system-query (system)
   (when-let ((query (ignore-errors (clution--system-query system))))
-    (setf (cl-getf system :system-query) query)))
+    (setf (cl-getf system :query-node) query)))
 
 (defun clution--insert-system (system indent)
   (let ((clution (clution--system.clution system)))
@@ -462,14 +543,15 @@ Returns the window displaying the buffer"
               (when clution (clution--clution.dir clution)))))
           :toplevel (cl-getf data :toplevel)
           :args (cl-getf data :args)
-          :system-query nil)))
+          :query-node nil)))
     (unless clution
-      (setf (cl-getf res :system-query) (clution--system-query res)))
+      (setf (cl-getf res :query-node) (clution--system-query res)))
     res))
 
 (defun clution--insert-cuo (cuo indent)
   (insert "(")
   (insert ":selected-system " (format "%S" (clution--cuo.selected-system cuo)))
+  (insert " :fold-states " (format "%S" (clution--cuo.fold-states cuo)))
   (insert ")"))
 
 (defun clution--save-cuo (&optional cuo path)
@@ -486,7 +568,8 @@ Returns the window displaying the buffer"
 (defun clution--make-cuo (data)
   (let ((res
          (list
-          :selected-system (cl-getf data :selected-system))))
+          :selected-system (cl-getf data :selected-system)
+          :fold-states (cl-getf data :fold-states))))
     res))
 
 (defun clution--parse-cuo-file (path)
@@ -594,10 +677,12 @@ Returns the window displaying the buffer"
              (clution--make-system sys-data res))
            (cl-getf data :systems)))
 
-    (let ((queries (clution--systems-query (clution--clution.systems res))))
-      (dolist (sys (clution--clution.systems res))
-        (setf (cl-getf sys :system-query) (car queries))
-        (pop queries)))
+    ;;Perform system queries
+    (cl-mapc
+     (lambda (system query)
+       (setf (cl-getf system :query-node) query))
+     (clution--clution.systems res)
+     (clution--systems-query (clution--clution.systems res)))
 
     (if (file-exists-p (clution--clution.cuo-path res))
         (setf (cl-getf res :cuo) (clution--parse-cuo-file (clution--clution.cuo-path res)))
@@ -790,23 +875,36 @@ Returns the window displaying the buffer"
 (defun clution--cuo.selected-system (cuo)
   (cl-getf cuo :selected-system))
 
+(defun clution--cuo.fold-states (cuo)
+  (cl-getf cuo :fold-states))
+
+(defun clution--cuo.get-fold-state (cuo node-id)
+  (if-let ((fold-state (assoc node-id (clution--cuo.fold-states cuo))))
+      (cdr fold-state)
+    t))
+
+(defun clution--cuo.set-fold-state (cuo node-id folded)
+  (let ((fold-state (assoc node-id (clution--cuo.fold-states cuo))))
+    (unless fold-state
+      (setf fold-state (cons node-id t))
+      (setf (cl-getf cuo :fold-states) (cons fold-state (clution--cuo.fold-states cuo))))
+    (setf (cdr fold-state) (and folded t)))
+  (clution--save-cuo cuo))
+
 (defun clution--system.path (clution-system)
   (cl-getf clution-system :path))
 
 (defun clution--system.dir (clution-system)
   (file-name-directory (clution--system.path clution-system)))
 
-(defun clution--system.query (clution-system)
-  (cl-getf clution-system :system-query))
+(defun clution--system.query-node (clution-system)
+  (cl-getf clution-system :query-node))
 
-(defun clution--system.children (clution-system)
-  (cdr (clution--system.query clution-system)))
-
-(defun clution--system.query-prop (clution-system prop)
-  (cl-getf (car (clution--system.query clution-system)) prop))
+(defun clution--system.query-node-prop (clution-system prop)
+  (cl-getf (clution--system.query-node clution-system) prop))
 
 (defun clution--system.name (clution-system)
-  (or (clution--system.query-prop clution-system :NAME)
+  (or (clution--system.query-node-prop clution-system :name)
       (downcase (file-name-base (clution--system.path clution-system)))))
 
 (defun clution--system.clution (clution-system)
@@ -843,6 +941,47 @@ Returns the window displaying the buffer"
      (clution--system.name clution-system)))
    (clution--system.name clution-system)
    "-script.lisp"))
+
+(defun clution--node.clution (node)
+  (clution--system.clution (clution--node.system node)))
+
+(defun clution--node.system (node)
+  (cl-getf node :system))
+
+(defun clution--node.parent (node)
+  (cl-getf node :parent))
+
+(defun clution--node.name (node)
+  (cl-getf node :name))
+
+(defun clution--node.path (node)
+  (cl-getf node :path))
+
+(defun clution--node.type (node)
+  (cl-getf node :type))
+
+(defun clution--node.children (node)
+  (cl-getf node :children))
+
+(defun clution--node.node-id (node)
+  (let ((res ())
+        (node node))
+    (while node
+      (push (clution--node.name node) res)
+      (setf node (clution--node.parent node)))
+    res))
+
+(defun clution--node.folded (node)
+  (let* ((node-id (clution--node.node-id node))
+         (clution (clution--node.clution node))
+         (cuo (clution--clution.cuo clution)))
+    (clution--cuo.get-fold-state cuo node-id)))
+
+(defun clution--node.set-folded (node folded)
+  (let* ((node-id (clution--node.node-id node))
+         (clution (clution--node.clution node))
+         (cuo (clution--clution.cuo clution)))
+    (clution--cuo.set-fold-state cuo node-id folded)))
 
 ;;;; Frontend/Backend Lisp access
 

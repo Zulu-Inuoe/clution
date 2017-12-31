@@ -10,6 +10,10 @@
   * [Run](#Run)
   * [REPL](#REPL)
   * [clutex](#clutex)
+* [clution-file](#clution-file)
+* [asd clution](#asd-clution)
+* [qlfiles](#qlfiles)
+* [clu-directory](#clu-directory)
 * [Rationale](#Rationale)
 
 ## Purpose
@@ -108,6 +112,23 @@ in a neotree style tree.
 
 Open and close it via `M-x clution-clutex-open` and `M-x clution-clutex-close`
 
+At the top of this tree, there is the clution file itself.
+If enabled for the clution, the [qlfile](#qlfiles) will be displayed directly
+under the clution.
+Afterwards, each system in the clution is visible, along with its components.
+
+In the clutex buffer, you may visit any file by double-clicking or pressing
+`Enter` on its node.
+
+Here are some common operations in the clutex buffer:
+
+* add system - `A` in the clutex buffer
+* select system - `S` while system is under point
+* remove system - `D` or `<delete>` while system is under point
+* open file - `Enter` or double-click on system/file
+
+The currently selected system is marked by a `<>` next to the file name
+
 ## clution file
 
 At its simplest, a clution file lists the systems thare together form your
@@ -120,9 +141,9 @@ pressing `A` while hovering over it in the [clutex](#clutex) buffer.
 To remove a system, move the emacs point over the system name and press `D`.
 
 However for many small projects, where only one system is relevant, see the
-section on [asd clutions](#asd clution).
+section on [asd clutions](#asd-clution).
 
-## asd clution
+## asd-clution
 
 For convenience in single-system projects, clution is able to operate on single
 asd files (`M-x clution-open-asd`).
@@ -140,14 +161,14 @@ directory as the asd, clution will use that file.
 slightly different behavior from qlot.
 When a clution specifies a qlfile, the operation `M-x clution-qlfile-sync` will
 synchronize clutex's libraries with the qfile. By default, the packages are
-stored in the clution's [clu directory](#clu directory).
+stored in the clution's [clu-directory](#clu-directory).
 When performing any operation on a clution, all packages in qlfile packages
 will be visible to ASDF.
 
 When naming conflicts occur, priority is given to clution-local systems over
 qlfile systems, followed by any user-configured systems.
 
-## clu directory
+## clu-directory
 
 clution stores project-local files, such as compiled fasls,
 [qlfile packages](#qlfiles), and generated scripts used for building, in its clu

@@ -1913,7 +1913,8 @@ See `file-notify-add-watch'"
 
 (defgroup clution nil
   "Options for clution."
-  :prefix "clution-")
+  :prefix "clution-"
+  :group 'applications)
 
 (defcustom clution-frontend 'roswell
   "The frontend to use as default for clution."

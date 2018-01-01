@@ -996,6 +996,12 @@ Returns the window displaying the buffer"
    (clution--system.name clution-system)
    "-script.lisp"))
 
+(defun clution--system.output-dir (clution-system)
+  (file-name-as-directory
+   (concat
+    (clution--clution.output-dir (clution--system.clution clution-system))
+    (clution--system.name clution-system))))
+
 (defun clution--node.clution (node)
   (clution--system.clution (clution--node.system node)))
 
@@ -1458,6 +1464,165 @@ Initializes ASDF and loads the selected system."
                     proc)))
           (funcall continue-build-fn (car systems))
           (setf success t))
+      (unless success
+        (setf *clution--current-op* nil)))))
+
+(defun clution--do-script-publish (system &optional cont)
+  (let* ((clution (clution--system.clution system))
+         (system-name (clution--system.name system))
+         (toplevel (clution--system.toplevel system))
+         (out-dir (clution--system.output-dir system))
+         (out-script-path (expand-file-name (concat system-name ".lisp") out-dir))
+         (out-qlfile-libs-dir (file-name-as-directory (expand-file-name "qlfile-libs" out-dir)))
+         (out-systems-dir  (file-name-as-directory (expand-file-name "systems" out-dir)))
+         (system-names-paths-alist
+            (mapcar
+             (lambda (system)
+               (cons
+                (clution--system.name system)
+                (concat
+                 (file-name-as-directory "systems")
+                 (file-name-as-directory (clution--system.name system))
+                 (file-name-nondirectory (clution--system.path system)))))
+             (clution--clution.systems clution))))
+    (clution--append-output
+     "Creating script bundle for '" system-name "' at\n"
+     "\t" out-dir "\n\n")
+
+    ;;Delete any existing publish
+    (when (file-exists-p out-dir)
+      (delete-directory out-dir t))
+    (make-directory out-dir t)
+
+    ;;bundle qlfile dependencies
+    (when (clution--clution.qlfile-p clution)
+      (clution--append-output
+       "Bundling qlfile packages...\n")
+      (make-directory out-qlfile-libs-dir t)
+      (dolist (dir (directory-files (clution--clution.qlfile-libs-dir clution) t "[^.|..]"))
+        (clution--append-output
+         "\n\tBundling package: '" (file-name-nondirectory dir) "'")
+        (copy-directory (file-name-as-directory dir) out-qlfile-libs-dir t t nil))
+
+      (clution--append-output
+       "\n\nFinished bundling qlfile packages\n\n"))
+    ;;bundle clution systems
+    (clution--append-output
+     "Bundling clution systems...\n")
+    (make-directory out-systems-dir t)
+    (dolist (system (clution--clution.systems clution))
+      (let ((system-name (clution--system.name system))
+            (system-path (clution--system.path system))
+            (system-dir (clution--system.dir system))
+            (system-out-dir (file-name-as-directory
+                             (expand-file-name system-name out-systems-dir))))
+        (clution--append-output
+         "\n\tBundling '" system-name "'")
+        (cl-labels ((recurse (node)
+                             (let* ((path (clution--node.path node))
+                                    (rel-path (file-relative-name path system-dir))
+                                    (new-path (expand-file-name rel-path system-out-dir)))
+                               (cond
+                                ((directory-name-p path)
+                                 (unless (file-exists-p new-path)
+                                   (make-directory new-path t)))
+                                (t
+                                 (unless (file-exists-p (file-name-directory new-path))
+                                   (make-directory (file-name-directory new-path) t))
+                                 (copy-file path new-path nil t nil nil)))
+                               (cl-mapc #'recurse (clution--node.children node)))
+                             (clution--node.path node)))
+          (recurse (clution--system.query-node system))
+          ;;Copy the asd itself
+          (copy-file system-path
+                     (expand-file-name (file-name-nondirectory system-path) system-out-dir)
+                     nil t nil nil))))
+    (clution--append-output
+     "\n\nFinished bundling clution systems\n\n")
+
+    (clution--append-output
+     "Generating script at '" out-script-path "'...\n")
+    ;;Create the runner script
+    (write-region
+     (pp-to-string
+      `(progn
+         (eval-when (:compile-toplevel :load-toplevel :execute)
+           (handler-bind
+               (require 'asdf)
+             (error (e)
+                    (format *error-output* "Error requiring ASDF:~%~T~A" e)
+                    ,(clution--exit-form 1))))
+         (eval-when (:compile-toplevel :load-toplevel :execute)
+           (handler-case
+               (progn
+                 ,@(when (clution--clution.qlfile-p clution)
+                     `((let ((qlfile-libs-paths
+                               (directory (merge-pathnames "qlfile-libs/**/*.asd" *load-truename*))))
+                          (flet ((clution-qlfile-libs-searcher (system-name)
+                                                               (loop
+                                                                :for path :in qlfile-libs-paths
+                                                                :if (string-equal system-name (pathname-name path))
+                                                                :return path)))
+                            (push (function clution-qlfile-libs-searcher)
+                                  asdf:*system-definition-search-functions*)))))
+                 (let ((clution-systems-alist
+                        (mapcar (lambda (p)
+                                  (cons (car p) (merge-pathnames (cdr p) *load-truename*)))
+                                ',system-names-paths-alist)))
+                   (flet ((clution-system-searcher (system-name)
+                                                   (loop :for (name . path) :in clution-systems-alist
+                                                         :if (string-equal system-name name)
+                                                         :return (parse-namestring path))))
+                     (push (function clution-system-searcher)
+                           asdf:*system-definition-search-functions*)))
+                 ;;Load our system
+                 (let ((*standard-output* (make-broadcast-stream))
+                       (*trace-output*    (make-broadcast-stream))
+                       (*error-output*    (make-broadcast-stream)))
+                   (asdf:load-system ,system-name :verbose nil)))
+             (error (e)
+                    (format *error-output* "Error loading systems:~%~T~A" e)
+                    ,(clution--exit-form 1))))))
+     nil
+     out-script-path
+     t)
+
+    (write-region
+     (pp-to-string
+      `(handler-case
+           (let ((ret-code (apply (function ,(intern toplevel)) ,(clution--args-list-form))))
+             (if (integerp ret-code)
+                 ,(clution--exit-form 'ret-code)
+               ,(clution--exit-form 0)))
+         (error (e)
+                (format *error-output* "Uncaught error:~%~T~A" e)
+                ,(clution--exit-form 1))))
+     nil
+     out-script-path
+     t)
+
+    (clution--append-output
+     "Finished generating script\n\n")
+
+    (clution--append-output
+     "Finished bundling '" system-name "'\n\n"))
+
+  (setf *clution--current-op* nil)
+  (when cont
+    (funcall cont)))
+
+(defun clution--do-publish (system &optional cont)
+  (clution--append-output
+   "Publish starting: '" (clution--system.name system) "'\n\n")
+
+  (setf *clution--current-op*
+        (list
+         :type 'clution-publish
+         :publish-system system))
+
+  (let ((success nil))
+    (unwind-protect
+        (clution--do-script-publish system cont)
       (unless success
         (setf *clution--current-op* nil)))))
 
@@ -2288,6 +2453,28 @@ generated clution files."
        (list (clution--clution.selected-system clution))
        (lambda ()
          (clution--do-run clution)))))))
+
+
+(defun clution-publish ()
+  "Perform a 'run' operation on the currently selected system in the clution"
+  (interactive)
+  (cond
+   ((not *clution--current-clution*)
+    (message "clution: no clution open"))
+   (*clution--current-op*
+    (message "clution: busy doing op: '%s'" (cl-getf *clution--current-op* :type)))
+   ((and (clution--clution.qlfile-p)
+         (not (file-exists-p (clution--clution.qlfile-libs-dir))))
+    (clution--clear-output)
+    (lexical-let ((clution *clution--current-clution*))
+      (clution--do-qlfile-sync
+       clution
+       (lambda ()
+         (clution--clear-output)
+         (clution--do-publish (clution--clution.selected-system))))))
+   (t
+    (clution--clear-output)
+    (clution--do-publish (clution--clution.selected-system)))))
 
 (defun clution-clean ()
   "Perform a 'clean' operation on the current clution."

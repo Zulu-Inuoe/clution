@@ -304,7 +304,7 @@ Returns the window displaying the buffer"
                  (map (make-sparse-keymap))
                  (button
                   (insert-button
-                   (clution--node.name parent)
+                   (concat (clution--node.name parent) "/")
                    'face 'clution-clutex-dir-face
                    'help-echo nil
                    'keymap map)))

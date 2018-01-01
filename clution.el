@@ -204,7 +204,9 @@ Returns the window displaying the buffer"
                  (map (make-sparse-keymap))
                  (button
                   (insert-button
-                   (clution--clution.name clution)
+                   (file-name-nondirectory
+                    (clution--clution.path clution))
+                   'face 'clution-clutex-clution-face
                    'keymap map)))
     (define-key map (kbd "C-m")
       (lambda ()
@@ -224,6 +226,8 @@ Returns the window displaying the buffer"
                  (button
                   (insert-button
                    (file-name-nondirectory (clution--clution.qlfile-path clution))
+                   'face 'clution-clutex-file-face
+                   'help-echo nil
                    'keymap map)))
     (define-key map (kbd "C-m")
       (lambda ()
@@ -234,17 +238,24 @@ Returns the window displaying the buffer"
 
 (defun clution--insert-system-button (system)
   (lexical-let* ((system system)
+                 (clution (clution--system.clution system))
+                 (selected (eq system (clution--clution.selected-system)))
                  (node (clution--system.query-node system))
                  (fold-map (make-sparse-keymap))
                  (fold-button
                   (insert-button
-                   (if (clution--node.folded node) ">" "v")
+                   (if (clution--node.folded node) "▸ " "▾ ")
+                   'face 'clution-clutex-system-face
+                   'help-echo nil
                    'keymap fold-map))
-                 (empty-space (insert " "))
                  (map (make-sparse-keymap))
                  (button
                   (insert-button
                    (file-name-nondirectory (clution--system.path system))
+                   'face (if selected
+                             'clution-clutex-selected-system-face
+                           'clution-clutex-system-face)
+                   'help-echo nil
                    'keymap map)))
     (define-key fold-map (kbd "C-m")
       (lambda ()
@@ -276,6 +287,8 @@ Returns the window displaying the buffer"
         (interactive)
         (clution--clutex-open-file (clution--system.path system))))
     (define-key map (kbd "<double-down-mouse-1>") (kbd "C-m"))
+
+    (define-key map (kbd "<mouse-1>") (kbd "TAB"))
     button))
 
 (defun clution--insert-parent-button (parent)
@@ -284,13 +297,16 @@ Returns the window displaying the buffer"
                   (make-sparse-keymap))
                  (fold-button
                   (insert-button
-                   (if (clution--node.folded parent) ">" "v")
+                   (if (clution--node.folded parent) "▸ " "▾ ")
+                   'face 'clution-clutex-dir-face
+                   'help-echo nil
                    'keymap fold-map))
                  (map (make-sparse-keymap))
-                 (blank-space (insert " "))
                  (button
                   (insert-button
                    (clution--node.name parent)
+                   'face 'clution-clutex-dir-face
+                   'help-echo nil
                    'keymap map)))
     (define-key fold-map (kbd "C-m")
       (lambda ()
@@ -304,6 +320,7 @@ Returns the window displaying the buffer"
         (interactive)
         (clution--toggle-parent-fold parent)))
     (define-key map (kbd "TAB") (kbd "C-m"))
+    (define-key map (kbd "<mouse-1>") (kbd "C-m"))
     button))
 
 (defun clution--insert-child-button (child)
@@ -312,6 +329,8 @@ Returns the window displaying the buffer"
                  (button
                   (insert-button
                    (file-name-nondirectory (clution--node.path child))
+                   'face 'clution-clutex-file-face
+                   'help-echo nil
                    'keymap map)))
     (define-key map (kbd "C-m")
       (lambda ()
@@ -352,8 +371,6 @@ Returns the window displaying the buffer"
     (dolist (system (clution--clution.systems clution))
       (insert "  ")
       (clution--insert-system-button system)
-      (when (eq (clution--clution.selected-system clution) system)
-        (insert " <>"))
       (insert "\n")
       (let ((node (clution--system.query-node system)))
         (unless (clution--node.folded node)
@@ -2023,6 +2040,35 @@ generated clution files."
 
 (defvar clution-repl-exited-hook nil
   "Hook executed whenever a 'repl' operation exits.")
+
+;;
+;; Faces
+;;
+
+(defface clution-clutex-clution-face
+  '((t                   (:inherit dired-header)))
+  "*Face used for the clution in clutex buffer."
+  :group 'clutex :group 'font-lock-highlighting-faces)
+
+(defface clution-clutex-system-face
+  '((t                   (:inherit dired-directory)))
+  "*Face used for systems in clutex buffer."
+  :group 'clutex :group 'font-lock-highlighting-faces)
+
+(defface clution-clutex-selected-system-face
+  '((t                   (:inherit dired-marked)))
+  "*Face used for the selected system in clutex buffer."
+  :group 'clutex :group 'font-lock-highlighting-faces)
+
+(defface clution-clutex-dir-face
+  '((t                   (:inherit dired-directory)))
+  "*Face used for directories in clutex buffer."
+  :group 'clutex :group 'font-lock-highlighting-faces)
+
+(defface clution-clutex-file-face
+  '((t                   (:inherit dired-perm-write)))
+  "*Face used for files in clutex buffer."
+  :group 'clutex :group 'font-lock-highlighting-faces)
 
 ;;; Modes and maps
 

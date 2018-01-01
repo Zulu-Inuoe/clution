@@ -1182,7 +1182,7 @@ the code obtained from evaluating the given `exit-code-form'."
 
 (defun clution--install-qlfile-libs-searcher-form (clution)
   (let ((dir-search-str (concat
-                         (clution--clution.qlfile-libs-dir nil)
+                         (clution--clution.qlfile-libs-dir clution)
                          "**/*.asd")))
     `(cl:flet ((clution-qlfile-libs-searcher (system-name)
                                       (cl:loop

@@ -43,7 +43,7 @@ Synchronously waits for evaluation to complete, and returns the result as an eli
            lisp-proc
            (make-process
             :name "*clution-lisp-eval*"
-            :command (list* (clution--spawn-lisp-command) (clution--spawn-lisp-args))
+            :command (append (clution--spawn-lisp-command) (clution--spawn-lisp-args))
             :filter
             (lambda (proc string)
               (setf output (concat output string)))))
@@ -991,8 +991,8 @@ Returns the window displaying the buffer"
   (cl-ecase clution-frontend
     (raw
      (cl-ecase clution-backend
-       (sbcl "sbcl")))
-    (roswell "ros")))
+       (sbcl (clution--sbcl-command))))
+    (roswell (clution--ros-command))))
 
 (defun clution--spawn-lisp-args ()
   "Arguments to spawn a lisp in a REL (repl without the print)."
@@ -1014,8 +1014,8 @@ Returns the window displaying the buffer"
   (cl-ecase clution-frontend
     (raw
      (cl-ecase clution-backend
-       (sbcl "sbcl")))
-    (roswell "ros")))
+       (sbcl (clution--sbcl-command))))
+    (roswell (clution--ros-command))))
 
 (defun clution--spawn-script-args (system)
   "Arguments to spawn a lisp which will load a script file, then exit."
@@ -1035,8 +1035,8 @@ Returns the window displaying the buffer"
   (cl-ecase clution-frontend
     (raw
      (cl-ecase clution-backend
-       (sbcl "sbcl")))
-    (roswell "ros")))
+       (sbcl (clution--sbcl-command))))
+    (roswell (clution--ros-command))))
 
 (defun clution--spawn-repl-args ()
   "Arguments to spawn a lisp in a REPL."
@@ -1062,22 +1062,55 @@ the code obtained from evaluating the given `exit-code-form'."
     (t
      `(uiop:quit ,exit-code-form cl:t))))
 
-(defun clution--qlot-command ()
-  (cl-ecase system-type
-    (windows-nt
-     (let ((qlot (locate-file "qlot" exec-path '("" ".ros")))
-           (ros (executable-find "ros")))
-       (unless qlot
-         (error "qlot not installed"))
-       (unless ros
-         (error "ros not installed"))
+(defun clution--sbcl-command ()
+  (let ((sbcl-path
+         (cond
+          ((eq clution-sbcl-path 'auto)
+           (let ((search-path exec-path))
+             (when-let ((sbcl-home (getenv "SBCL_HOME")))
+               (setf search-path (append search-path (list (file-name-as-directory sbcl-home)))))
+             (locate-file "sbcl" search-path exec-suffixes 1)))
+          (t
+           (and (stringp clution-sbcl-path)
+                (file-exists-p clution-sbcl-path)
+                clution-sbcl-path)))))
+    (unless sbcl-path
+      (error "sbcl not installed"))
 
-       (list ros qlot)))
-    (t
-     (let ((qlot (locate-file "qlot" exec-path '("" ".ros"))))
-       (unless qlot
-         (error "qlot not installed"))
-       (list qlot)))))
+    (list sbcl-path)))
+
+(defun clution--ros-command ()
+  (let ((ros-path
+         (cond
+          ((eq clution-ros-path 'auto)
+           (locate-file "ros" exec-path exec-suffixes 1))
+          (t
+           (and (stringp clution-ros-path)
+                (file-exists-p clution-ros-path)
+                clution-ros-path)))))
+    (unless ros-path
+      (error "ros not installed"))
+
+    (list ros-path)))
+
+(defun clution--qlot-command ()
+  (let ((qlot-path
+         (cond
+          ((eq clution-qlot-path 'auto)
+           (locate-file "qlot" (append exec-path '("~/.roswell/bin/")) '("" ".ros")))
+          (t
+           (and (stringp clution-qlot-path)
+                (file-exists-p clution-qlot-path)
+                clution-qlot-path)))))
+    (unless qlot-path
+      (error "qlot not installed"))
+
+    (cl-ecase system-type
+      (windows-nt
+       ;;On windows we need to run qlot through ros
+       (append (clution--ros-command) (list qlot-path)))
+      (t
+       (list qlot-path)))))
 
 (defun clution--install-system-searcher-form (clution)
   (let ((names-paths-alist
@@ -1210,7 +1243,7 @@ Initializes ASDF and loads the selected system."
        (make-process
         :name "clution-spawn-script"
         :buffer clution-run-buffer
-        :command (list* (clution--spawn-script-command) (clution--spawn-script-args system))
+        :command (append (clution--spawn-script-command) (clution--spawn-script-args system))
         :connection-type nil
         :noquery nil
         :sentinel
@@ -1239,7 +1272,8 @@ Initializes ASDF and loads the selected system."
                   (concat
                    "start"
                    " "
-                   (clution--spawn-script-command)
+                   (clution--arglist-to-string
+                    (clution--spawn-script-command))
                    " "
                    (clution--arglist-to-string
                     (clution--spawn-script-args system))))))
@@ -1345,7 +1379,7 @@ Initializes ASDF and loads the selected system."
                 (lambda (system)
                   (clution--append-output
                    (clution--system.name system) ": build starting\n\n")
-                  (let* ((command (list* (clution--spawn-lisp-command) (clution--spawn-lisp-args)))
+                  (let* ((command (append (clution--spawn-lisp-command) (clution--spawn-lisp-args)))
                          (proc
                           (clution--async-proc
                            :command command
@@ -1591,7 +1625,7 @@ Initializes ASDF and loads the selected system."
             (remove-hook 'sly-connected-hook connected-hook)))
     (add-hook 'clution-repl-start-failed-hook start-failed-hook))
 
-  (let* ((command (list* (clution--spawn-repl-command) (clution--spawn-repl-args)))
+  (let* ((command (append (clution--spawn-repl-command) (clution--spawn-repl-args)))
          (sly-inferior-buffer
           (sly-start
            :program (first command)
@@ -1696,7 +1730,7 @@ Initializes ASDF and loads the selected system."
             (remove-hook 'slime-connected-hook connected-hook)))
     (add-hook 'clution-repl-start-failed-hook start-failed-hook))
 
-  (let* ((command (list* (clution--spawn-repl-command) (clution--spawn-repl-args)))
+  (let* ((command (append (clution--spawn-repl-command) (clution--spawn-repl-args)))
          (slime-inferior-buffer
           (cl-flet ((do-start ()
                               (slime-start
@@ -1925,6 +1959,24 @@ This only matters when `clution-intrusive-ui' is enabled."
 generated clution files."
   :type '(choice (const :tag "Automatically determine by following standard conventions for the platform." auto)
                  (directory :tag "Use a custom directory"))
+  :group 'clution)
+
+(defcustom clution-sbcl-path 'auto
+  "Path to SBCL."
+  :type '(choice (const :tag "Automatically find SBCL in PATH and SBCL_HOME." auto)
+                 (file :must-match t :tag "Use the specified path"))
+  :group 'clution)
+
+(defcustom clution-ros-path 'auto
+  "Path to roswell."
+  :type '(choice (const :tag "Automatically find ros in PATH." auto)
+                 (file :must-match t :tag "Use the specified path"))
+  :group 'clution)
+
+(defcustom clution-qlot-path 'auto
+  "Path to qlot."
+  :type '(choice (const :tag "Automatically find qlot in PATH and ~/.roswell/bin/" auto)
+                 (file :must-match t :tag "Use the specified path"))
   :group 'clution)
 
 (defgroup clutex nil

@@ -911,6 +911,17 @@ Returns the window displaying the buffer"
    (cl-getf clution :qlfile)
    (clution--clution.dir clution)))
 
+(defun clution--clution.set-qlfile-path (path &optional clution)
+  (unless clution
+    (setf clution *clution--current-clution*))
+
+  (setf (cl-getf clution :qlfile)
+        (if path
+            (file-relative-name path (clution--clution.dir clution))
+          nil))
+
+  (clution--save-clution clution))
+
 (defun clution--clution.qlfile-dir (&optional clution)
   (unless clution
     (setf clution *clution--current-clution*))
@@ -2500,6 +2511,21 @@ generated clution files."
    (list (clution--read-new-file-name "path to new clution: ")))
   (let ((clution (clution--make-clution (list) path)))
     (clution--save-clution clution)))
+
+(defun clution-set-qlfile (path)
+  (interactive
+   (list nil))
+  (cond
+   ((not *clution--current-clution*)
+    (message "clution: no clution open"))
+   (*clution--current-op*
+    (message "clution: busy doing op: '%s'" (cl-getf *clution--current-op* :type)))
+   (t
+    (unless path
+      (setq path (clution--read-file-name "qlfile path open: " (clution--clution.dir) "qlfile" t)))
+    (let ((replace (or (not (clution--clution.qlfile-p))
+                       (y-or-n-p (format "clution already has qlfile (%s), replace?" (clution--clution.qlfile-path))))))
+      (clution--clution.set-qlfile-path path)))))
 
 (defun clution-open (path)
   "Opens `path' and sets it as the current clution."

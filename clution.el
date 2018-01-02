@@ -605,7 +605,7 @@ Returns the window displaying the buffer"
 (defun clution--insert-cuo (cuo indent)
   (insert "(")
   (insert ":selected-system " (format "%S" (clution--cuo.selected-system cuo)))
-  (insert " :system-args " (format "%S" (clution--cuo.system-args cuo)))
+  (insert " :system-args " (format "%S" (cl-getf cuo :system-args)))
   (insert " :fold-states " (format "%S" (clution--cuo.fold-states cuo)))
   (insert ")"))
 

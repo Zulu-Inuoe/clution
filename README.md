@@ -230,3 +230,8 @@ problems ASDF is made to address.
 Likewise, Quicklisp need not be used, and project dependencies obtained and
 installed by scouring the web and forums.
 What these tools do is provide consistent solutions to common problems.
+
+## License
+
+CC0-1.0 Public Domain
+See [LICENCE.txt](LICENSE.txt)

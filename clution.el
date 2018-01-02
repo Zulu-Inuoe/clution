@@ -1644,6 +1644,95 @@ Initializes ASDF and loads the selected system."
   (when cont
     (funcall cont)))
 
+(defun clution--do-exe-publish (system &optional cont)
+  (let* ((clution (clution--system.clution system))
+         (system-name (clution--system.name system))
+         (toplevel (clution--system.toplevel system))
+         (out-dir (clution--system.output-dir system))
+         (out-exe-path (expand-file-name (if (eq system-type 'windows-nt)
+                                             (concat system-name ".exe")
+                                           system-name)
+                                         out-dir)))
+    (clution--append-output
+     "Creating executable for '" system-name "' at\n"
+     "\t" out-dir "\n\n")
+
+    ;;Delete any existing publish
+    (when (file-exists-p out-dir)
+      (delete-directory out-dir t))
+    (make-directory out-dir t)
+
+    (let ((proc
+           (clution--async-proc
+            :name "*clution-exe-publish-proc*"
+            :command (append (clution--spawn-lisp-command) (clution--spawn-lisp-args))
+            :dir (clution--clution.dir clution)
+            :filter (lambda (proc string)
+                      (clution--append-output string))
+            :cont
+            (lexical-let ((cont cont)
+                          (system-name system-name))
+              (lambda (code)
+                (setf *clution--current-op* nil)
+                (if (zerop code)
+                    (clution--append-output "\nFinished building '" system-name "'\n\n")
+                  (clution--append-output
+                   (format "\nError building '%s', exited with code %d (0x%x)\n\n" system-name code code)))
+                (when cont
+                  (funcall cont)))))))
+
+      (process-send-string
+       proc
+       (format
+        "%S\n"
+        `(handler-case
+             (require 'asdf)
+           (error (e)
+                  (format *error-output* "Error requiring ASDF:~%~T~A" e)
+                  ,(clution--exit-form 1)))))
+      (process-send-string
+       proc
+       (format
+        "%S\n"
+        `(handler-case
+             (progn
+               ,(when (clution--clution.qlfile-p clution)
+                  (clution--install-qlfile-libs-searcher-form clution))
+               ,(clution--install-system-searcher-form clution)
+               ,(clution--install-output-translations-form clution)
+
+               ;;Load our system
+               (asdf:load-system ,system-name :verbose t))
+           (error (e)
+                  (format *error-output* "clution: error: loading systems:~%~T~A" e)
+                  ,(clution--exit-form 1)))))
+      (process-send-string
+       proc
+       (format
+        "%S\n"
+        `(progn
+           (handler-case
+               (progn
+                 (unless (fboundp ',(intern toplevel))
+                   (format *error-output* "clution: error: toplevel is not fboundp~%")
+                   ,(clution--exit-form 1))
+                 (defun clution-entry-point ()
+                   (handler-case
+                       (let ((ret-code (apply (function ,(intern toplevel)) ,(clution--args-list-form))))
+                         (if (integerp ret-code)
+                             ,(clution--exit-form 'ret-code)
+                           ,(clution--exit-form 0)))
+                     (error (e)
+                            (format *error-output* "Uncaught error:~%~T~A" e)
+                            ,(clution--exit-form 1))))
+                 (setf uiop:*image-entry-point* #'clution-entry-point))
+             (error (e)
+                    (format *error-output* "clution: error: establishing toplevel~%~T~A" e)
+                  ,(clution--exit-form 1)))
+           (uiop:dump-image
+            ,out-exe-path
+            :executable t)))))))
+
 (defun clution--do-publish (system &optional cont)
   (clution--append-output
    "Publish starting: '" (clution--system.name system) "'\n\n")
@@ -1655,7 +1744,15 @@ Initializes ASDF and loads the selected system."
 
   (let ((success nil))
     (unwind-protect
-        (clution--do-script-publish system cont)
+        (case (clution--system.type system)
+          (:script
+           (clution--do-script-publish system cont))
+          (:executable
+           (clution--do-exe-publish system cont))
+          (:library
+           ;;nothing tbd atm
+           (when cont
+             (funcall cont))))
       (unless success
         (setf *clution--current-op* nil)))))
 

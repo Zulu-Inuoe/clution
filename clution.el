@@ -2636,6 +2636,73 @@ generated clution files."
     (clution-open path)
     (find-file path)))
 
+(defvar *clution--licenses-alist*
+  '((mit . "MIT")
+    (zlib . "zlib/libpng")
+    (libpng . "zlib/libpng")
+    (zlib/libpng . "zlib/libpng")
+    (bsd . "BSD-2-Clause")
+    (bsd-2 . "BSD-2-Clause")
+    (bsd-2-clause . "BSD-2-Clause")
+    (bsd-3 . "BSD-3-Clause")
+    (bsd-3-clause . "BSD-3-Clause")
+    (cc0 . "CC0")))
+
+(defun clution-create-asd (path &optional open name version description author license)
+  "Create a new clution file at `path'"
+  (interactive
+   (list
+    (clution--read-file-name "path to new system: ")
+    t))
+
+  (unless (string-equal (file-name-extension path) "asd")
+    (setf path (concat path ".asd")))
+
+  (when (or (not (file-exists-p path))
+            (y-or-n-p (format "file '%s' already exists. ovewrite?" path)))
+    (let ((name (file-name-base path))
+          (version (or version "0.0.0"))
+          (description (or description ""))
+          (author (or author
+                      (and user-full-name user-mail-address
+                           (format "%s <%s>" user-full-name user-mail-address))
+                      user-full-name
+                      ""))
+          (license (or (and license (cdr (assoc
+                                          (intern (format "%s" license))
+                                          *clution--licenses-alist*)))
+                       (cdr (first *clution--licenses-alist*))))
+          (dir (file-name-directory path)))
+      (unless (file-exists-p dir)
+        (make-directory dir t))
+      (with-temp-file path
+        (insert
+         (format "(defsystem #:%s
+  :name \"%s\"
+  :version \"%s\"
+  :description \"%s\"
+  :author \"%s\"
+  :license \"%s\"
+  :components
+  ()
+  :depends-on
+  ())
+"
+                 name
+                 name
+                 version
+                 description
+                 author
+                 license)))))
+
+  (when open
+    (cond
+     (*clution--current-clution*
+      (clution--add-system *clution--current-clution* path))
+     (t
+      (clution-open-asd path)))
+    (find-file path)))
+
 (defun clution-set-qlfile (path)
   (interactive
    (list nil))

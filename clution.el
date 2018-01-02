@@ -221,6 +221,8 @@ Returns the window displaying the buffer"
       (lambda ()
         (interactive)
         (clution--query-and-add-system clution)))
+
+    (define-key map (kbd "N") 'clution-create-asd)
     button))
 
 (defun clution--insert-qlfile-button (clution)
@@ -2252,7 +2254,7 @@ See `file-notify-add-watch'"
 
 (defun clution--query-and-add-system (clution)
   (interactive)
-  (let ((path (clution--read-file-name "Add system:" (clution--clution.dir) nil t)))
+  (let ((path (clution--read-file-name "add existing system to clution: " (clution--clution.dir) nil t)))
     (clution--add-system *clution--current-clution* path)))
 
 ;;;; Public interface
@@ -2458,6 +2460,7 @@ generated clution files."
           (message "clution: no clution open"))
          (t
           (clution--query-and-add-system *clution--current-clution*)))))
+    (define-key map (kbd "N") 'clution-create-asd)
     map))
 
 (define-derived-mode clutex-mode special-mode "ClutexMode"
@@ -2627,8 +2630,10 @@ generated clution files."
 (defun clution-create-clution (path &optional open)
   "Create a new clution file at `path'"
   (interactive
-   (list (clution--read-new-file-name "path to new clution: ")
+   (list (clution--read-new-file-name "create new clution at: ")
          t))
+  (unless (string-equal (file-name-extension path) "clu")
+    (setf path (concat path ".clu")))
   (let ((clution (clution--make-clution (list) path)))
     (clution--save-clution clution))
 
@@ -2652,14 +2657,14 @@ generated clution files."
   "Create a new clution file at `path'"
   (interactive
    (list
-    (clution--read-file-name "path to new system: ")
+    (clution--read-file-name "create new system at: ")
     t))
 
   (unless (string-equal (file-name-extension path) "asd")
     (setf path (concat path ".asd")))
 
   (when (or (not (file-exists-p path))
-            (y-or-n-p (format "file '%s' already exists. ovewrite?" path)))
+            (y-or-n-p (format "confirm: file '%s' already exists. ovewrite?" path)))
     (let ((name (file-name-base path))
           (version (or version "0.0.0"))
           (description (or description ""))

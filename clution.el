@@ -575,8 +575,8 @@ Returns the window displaying the buffer"
       (insert " :startup-dir " (format "%S" startup-dir)))
     (when-let ((toplevel (cl-getf system :toplevel)))
       (insert " :toplevel " (format "%S" toplevel)))
-    (when-let ((args (cl-getf system :args)))
-      (insert " :args " (format "%S" args)))
+    (when-let ((type (cl-getf system :type)))
+      (insert " :type " (format "%S" type)))
     (insert ")")))
 
 (defun clution--make-system (data &optional clution)
@@ -596,7 +596,7 @@ Returns the window displaying the buffer"
               dir
               (when clution (clution--clution.dir clution)))))
           :toplevel (cl-getf data :toplevel)
-          :args (cl-getf data :args)
+          :type (cl-getf data :type)
           :query-node nil)))
     (unless clution
       (setf (cl-getf res :query-node) (clution--system-query res)))
@@ -605,6 +605,7 @@ Returns the window displaying the buffer"
 (defun clution--insert-cuo (cuo indent)
   (insert "(")
   (insert ":selected-system " (format "%S" (clution--cuo.selected-system cuo)))
+  (insert " :system-args " (format "%S" (clution--cuo.system-args cuo)))
   (insert " :fold-states " (format "%S" (clution--cuo.fold-states cuo)))
   (insert ")"))
 
@@ -623,6 +624,7 @@ Returns the window displaying the buffer"
   (let ((res
          (list
           :selected-system (cl-getf data :selected-system)
+          :system-args (cl-getf data :system-args)
           :fold-states (cl-getf data :fold-states))))
     res))
 
@@ -940,6 +942,18 @@ Returns the window displaying the buffer"
 (defun clution--cuo.selected-system (cuo)
   (cl-getf cuo :selected-system))
 
+(defun clution--cuo.system-args (cuo system)
+  (cdr (assoc (clution--system.name system) (cl-getf cuo :system-args))))
+
+(defun clution--cuo.set-system-args (args cuo system)
+  (let* ((system-name (clution--system.name system))
+         (cons (assoc system-name (cl-getf cuo :system-args)))
+         (fixed-args (mapcar (lambda (arg) (format "%s" arg)) args)))
+    (unless cons
+      (setf cons (cons system-name fixed-args))
+      (setf (cl-getf cuo :system-args) (cons cons (cl-getf cuo :system-args))))
+    (setf (cdr args) fixed-args)))
+
 (defun clution--cuo.fold-states (cuo)
   (cl-getf cuo :fold-states))
 
@@ -975,6 +989,9 @@ Returns the window displaying the buffer"
 (defun clution--system.clution (clution-system)
   (cl-getf clution-system :clution))
 
+(defun clution--system.cuo (clution-system)
+  (clution--clution.cuo (clution--system.clution clution-system)))
+
 (defun clution--system.toplevel (clution-system)
   (or (cl-getf clution-system :toplevel)
       "common-lisp-user::main"))
@@ -988,7 +1005,12 @@ Returns the window displaying the buffer"
       :library))
 
 (defun clution--system.args (clution-system)
-  (cl-getf clution-system :args))
+  (let* ((cuo (clution--system.cuo clution-system)))
+    (clution--cuo.system-args cuo clution-system)))
+
+(defun clution--system.set-args (args clution-system)
+  (let* ((cuo (clution--system.cuo clution-system)))
+    (clution--cuo.set-system-args args cuo clution-system)))
 
 (defun clution--system.cache-dir (clution-system)
   (or (and (clution--system.clution clution-system)

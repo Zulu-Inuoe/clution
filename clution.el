@@ -217,11 +217,7 @@ Returns the window displaying the buffer"
         (interactive)
         (clution--clutex-open-file  (clution--clution.path clution))))
 
-    (define-key map (kbd "A")
-      (lambda ()
-        (interactive)
-        (clution--query-and-add-system clution)))
-
+    (define-key map (kbd "A") 'clution-add-system)
     (define-key map (kbd "N") 'clution-create-asd)
     button))
 
@@ -2252,11 +2248,6 @@ See `file-notify-add-watch'"
       (attribute-changed)
       (stopped))))
 
-(defun clution--query-and-add-system (clution)
-  (interactive)
-  (let ((path (clution--read-file-name "add existing system to clution: " (clution--clution.dir) nil t)))
-    (clution--add-system *clution--current-clution* path)))
-
 ;;;; Public interface
 
 ;;; Customization
@@ -2427,7 +2418,6 @@ generated clution files."
       (clution-close)
       (remove-hook 'find-file-hook 'clution--find-file-hook)))))
 
-
 (define-derived-mode clution-file-mode lisp-mode
   "clution-file"
   "Major mode for editing a clution project file.")
@@ -2452,14 +2442,7 @@ generated clution files."
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "q") 'clution-close-clutex)
     (define-key map (kbd "Q") 'clution-close)
-    (define-key map (kbd "A")
-      (lambda ()
-        (interactive)
-        (cond
-         ((not *clution--current-clution*)
-          (message "clution: no clution open"))
-         (t
-          (clution--query-and-add-system *clution--current-clution*)))))
+    (define-key map (kbd "A") 'clution-add-system)
     (define-key map (kbd "N") 'clution-create-asd)
     map))
 
@@ -2722,6 +2705,18 @@ generated clution files."
      (t
       (clution-open-asd path)))
     (find-file path)))
+
+(defun clution-add-system (clution path)
+  (interactive
+   (list *clution--current-clution*
+         nil))
+  (cond
+   ((not clution)
+    (message "clution: no clution open"))
+   (t
+    (when (and (not path) (interactive-p))
+      (setf path (clution--read-file-name "add existing system to clution: " nil nil t)))
+    (clution--add-system clution path))))
 
 (defun clution-set-qlfile (path)
   (interactive

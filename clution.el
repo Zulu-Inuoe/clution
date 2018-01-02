@@ -2624,12 +2624,17 @@ generated clution files."
      "Clean complete: '" (clution--clution.name)
      "'\n"))))
 
-(defun clution-create-clution (path)
+(defun clution-create-clution (path &optional open)
   "Create a new clution file at `path'"
   (interactive
-   (list (clution--read-new-file-name "path to new clution: ")))
+   (list (clution--read-new-file-name "path to new clution: ")
+         t))
   (let ((clution (clution--make-clution (list) path)))
-    (clution--save-clution clution)))
+    (clution--save-clution clution))
+
+  (when open
+    (clution-open path)
+    (find-file path)))
 
 (defun clution-set-qlfile (path)
   (interactive

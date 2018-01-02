@@ -126,12 +126,13 @@ Here are some common operations in the clutex buffer:
 * select system - `S` while system is under point
 * remove system - `D` or `<delete>` while system is under point
 * open file - `Enter` or double-click on system/file
+* fold/unfold node - `Enter` on directories, `TAB` on systems or directories
 
 The currently selected system is marked by a `<>` next to the file name
 
 ## clution file
 
-At its simplest, a clution file lists the systems thare together form your
+At its simplest, a clution file lists the systems that together form your
 project.
 
 It's possible to create a new clution file via `M-x clution-create-clution`
@@ -142,6 +143,21 @@ To remove a system, move the emacs point over the system name and press `D`.
 
 However for many small projects, where only one system is relevant, see the
 section on [asd clutions](#asd-clution).
+
+### Adding systems to a clution
+
+To add an existing system, call `M-x clution-add-system`, or press `A` in
+the [clutex](#clutex) buffer.
+This will prompt you for a system path and add it to the current clution.
+
+### Creating new systems
+
+clution can create a system for you by calling `M-x clution-create-system`,
+or pressing `N` in the clutex buffer.
+This system create a simple system asd, package.lisp, and <system-name>.lisp
+files.
+If you have a clution open, it will be added to the current clution.
+Otherwise, clution will open it in [asd-clution](#asd-clution) mode.
 
 ## asd-clution
 

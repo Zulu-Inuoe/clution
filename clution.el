@@ -2688,8 +2688,10 @@ generated clution files."
   :description \"%s\"
   :author \"%s\"
   :license \"%s\"
+  :serial t
   :components
-  ()
+  ((:file \"package\")
+   (:file \"%s\"))
   :depends-on
   ())
 "
@@ -2698,7 +2700,20 @@ generated clution files."
                  version
                  description
                  author
-                 license)))))
+                 license
+                 name)))
+      (let ((package-path (expand-file-name "package.lisp" dir)))
+        (with-temp-file package-path
+          (insert
+           "(in-package #:cl-user)\n\n"
+           (format "(defpackage #:%s
+  (:use #:cl)
+  (:export))"
+                   name))))
+      (let ((main-path (expand-file-name (concat name ".lisp") dir)))
+        (with-temp-file main-path
+          (insert
+           (format "(in-package #:%s)\n\n" name))))))
 
   (when open
     (cond

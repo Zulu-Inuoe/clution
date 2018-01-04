@@ -1385,6 +1385,10 @@ Initializes ASDF and loads the selected system."
                   (concat
                    "start"
                    " "
+                   ;;This is the 'title', when it's in double-quotes
+                   (clution--arglist-to-string
+                    (list (clution--system.name system)))
+                   " "
                    (clution--arglist-to-string
                     (clution--spawn-script-command))
                    " "

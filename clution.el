@@ -2723,7 +2723,10 @@ generated clution files."
       (let ((main-path (expand-file-name (concat name ".lisp") dir)))
         (with-temp-file main-path
           (insert
-           (format "(in-package #:%s)\n\n" name))))))
+           (format "(in-package #:%s)\n\n" name)
+           (format "(defun main (&rest args)
+  0)
+"))))))
 
   (when open
     (cond

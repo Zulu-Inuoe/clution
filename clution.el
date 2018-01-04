@@ -2649,7 +2649,7 @@ generated clution files."
 
   (when open
     (clution-open path)
-    (find-file path)))
+    (select-window (clution--clutex-open-file path))))
 
 (defvar *clution--licenses-alist*
   '((mit . "MIT")
@@ -2731,7 +2731,7 @@ generated clution files."
       (clution--add-system *clution--current-clution* path))
      (t
       (clution-open-asd path)))
-    (find-file path)))
+    (select-window (clution--clutex-open-file path))))
 
 (defun clution-add-system (clution path)
   (interactive

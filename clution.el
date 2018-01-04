@@ -1329,15 +1329,19 @@ Initializes ASDF and loads the selected system."
 (defun clution--arglist-to-string (arglist)
   "Transforms a list of arguments into a string suitable for windows cmd"
   (with-temp-buffer
-    (dolist (s arglist)
-      (insert " ^\""
-              (replace-regexp-in-string
-               "\n" "^\n\n"
-               (replace-regexp-in-string
-                "\\((\\|)\\|%\\|!\\|\\^\\|\"\\|<\\|>\\|&\\||\\)"
-                "^\\1"
-                (replace-regexp-in-string "\"" "\\\\\"" s)))
-              "^\""))
+    (let ((first t))
+      (dolist (s arglist)
+        (if first
+            (setq first nil)
+          (insert " "))
+        (insert "^\""
+                (replace-regexp-in-string
+                 "\n" "^\n\n"
+                 (replace-regexp-in-string
+                  "\\((\\|)\\|%\\|!\\|\\^\\|\"\\|<\\|>\\|&\\||\\)"
+                  "^\\1"
+                  (replace-regexp-in-string "\"" "\\\\\"" s)))
+                "^\"")))
     (buffer-string)))
 
 (defun clution--spawn-script (system sentinel)

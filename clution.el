@@ -1232,10 +1232,10 @@ the code obtained from evaluating the given `exit-code-form'."
                          (clution--clution.qlfile-libs-dir clution)
                          "**/*.asd")))
     `(cl:flet ((clution-qlfile-libs-searcher (system-name)
-                                      (cl:loop
-                                       :for path :in (cl:directory ,dir-search-str)
-                                       :if (cl:string-equal system-name (cl:pathname-name path))
-                                       :return path)))
+                                             (cl:loop
+                                              :for path :in (cl:directory ,dir-search-str)
+                                              :if (cl:string-equal system-name (cl:pathname-name path))
+                                              :return path)))
               (cl:push (cl:function clution-qlfile-libs-searcher)
                        asdf:*system-definition-search-functions*))))
 
@@ -1288,22 +1288,31 @@ Initializes ASDF and loads the selected system, then calls its toplevel."
         (toplevel (clution--system.toplevel system))
         (args (clution--system.args system)))
     `(cl:progn
-      ,(when (clution--clution.qlfile-p clution)
-         (clution--install-qlfile-libs-searcher-form clution))
-      ,(clution--install-system-searcher-form clution)
-      ,(clution--install-output-translations-form clution)
-       (cl:let ((cl:*standard-output* (cl:make-broadcast-stream))
-                (cl:*trace-output* (cl:make-broadcast-stream)))
-         (asdf:load-system ,system-name :verbose nil))
+      (cl:handler-case
+       (cl:progn
+        (cl:let ((cl:*standard-input* (cl:make-broadcast-stream))
+                 (cl:*error-output* (cl:make-broadcast-stream))
+                 (cl:*standard-output* (cl:make-broadcast-stream))
+                 (cl:*trace-output* (cl:make-broadcast-stream))
+                 (cl:*debug-io* (cl:make-broadcast-stream))
+                 (cl:*query-io* (cl:make-broadcast-stream)))
+                ,(when (clution--clution.qlfile-p clution)
+                   (clution--install-qlfile-libs-searcher-form clution))
+                ,(clution--install-system-searcher-form clution)
+                ,(clution--install-output-translations-form clution)
+                (asdf:load-system ,system-name :verbose nil)))
+       (cl:error (e)
+                 (cl:format *error-output* "Uncaught error while building:~%~T~A" e)
+                 ,(clution--exit-form 1)))
 
-       (cl:handler-case
-           (cl:let ((ret-code (cl:apply (cl:read-from-string ,toplevel) ',args)))
-             (cl:if (cl:integerp ret-code)
-                 ,(clution--exit-form 'ret-code)
-               ,(clution--exit-form 0)))
-         (cl:error (e)
-                   (cl:format *error-output* "Uncaught error while running:~%~T~A" e)
-                   ,(clution--exit-form 1))))))
+      (cl:handler-case
+       (cl:let ((ret-code (cl:apply (cl:read-from-string ,toplevel) ',args)))
+               (cl:if (cl:integerp ret-code)
+                      ,(clution--exit-form 'ret-code)
+                      ,(clution--exit-form 0)))
+       (cl:error (e)
+                 (cl:format *error-output* "Uncaught error while running:~%~T~A" e)
+                 ,(clution--exit-form 1))))))
 
 (defun clution--repl-form (clution)
   "Form to initialize a repl to the given clution.
@@ -1517,15 +1526,15 @@ Initializes ASDF and loads the selected system."
          (out-qlfile-libs-dir (file-name-as-directory (expand-file-name "qlfile-libs" out-dir)))
          (out-systems-dir  (file-name-as-directory (expand-file-name "systems" out-dir)))
          (system-names-paths-alist
-            (mapcar
-             (lambda (system)
-               (cons
-                (clution--system.name system)
-                (concat
-                 (file-name-as-directory "systems")
-                 (file-name-as-directory (clution--system.name system))
-                 (file-name-nondirectory (clution--system.path system)))))
-             (clution--clution.systems clution))))
+          (mapcar
+           (lambda (system)
+             (cons
+              (clution--system.name system)
+              (concat
+               (file-name-as-directory "systems")
+               (file-name-as-directory (clution--system.name system))
+               (file-name-nondirectory (clution--system.path system)))))
+           (clution--clution.systems clution))))
     (clution--append-output
      "Creating script bundle for '" system-name "' at\n"
      "\t" out-dir "\n\n")
@@ -1598,14 +1607,14 @@ Initializes ASDF and loads the selected system."
                (progn
                  ,@(when (clution--clution.qlfile-p clution)
                      `((let ((qlfile-libs-paths
-                               (directory (merge-pathnames "qlfile-libs/**/*.asd" *load-truename*))))
-                          (flet ((clution-qlfile-libs-searcher (system-name)
-                                                               (loop
-                                                                :for path :in qlfile-libs-paths
-                                                                :if (string-equal system-name (pathname-name path))
-                                                                :return path)))
-                            (push (function clution-qlfile-libs-searcher)
-                                  asdf:*system-definition-search-functions*)))))
+                              (directory (merge-pathnames "qlfile-libs/**/*.asd" *load-truename*))))
+                         (flet ((clution-qlfile-libs-searcher (system-name)
+                                                              (loop
+                                                               :for path :in qlfile-libs-paths
+                                                               :if (string-equal system-name (pathname-name path))
+                                                               :return path)))
+                           (push (function clution-qlfile-libs-searcher)
+                                 asdf:*system-definition-search-functions*)))))
                  (let ((clution-systems-alist
                         (mapcar (lambda (p)
                                   (cons (car p) (merge-pathnames (cdr p) *load-truename*)))
@@ -1736,7 +1745,7 @@ Initializes ASDF and loads the selected system."
                  (setf uiop:*image-entry-point* #'clution-entry-point))
              (error (e)
                     (format *error-output* "clution: error: establishing toplevel~%~T~A" e)
-                  ,(clution--exit-form 1)))
+                    ,(clution--exit-form 1)))
            (uiop:dump-image
             ,out-exe-path
             :executable t)))))))

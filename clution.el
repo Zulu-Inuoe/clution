@@ -1002,7 +1002,7 @@ Returns the window displaying the buffer"
 
 (defun clution--system.toplevel (clution-system)
   (or (cl-getf clution-system :toplevel)
-      "common-lisp-user::main"))
+      (format "%s::main" (clution--system.name clution-system))))
 
 (defun clution--system.startup-dir (clution-system)
   (or (cl-getf clution-system :startup-dir)

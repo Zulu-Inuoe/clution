@@ -42,45 +42,116 @@ Arguments accepted:
                 (funcall cont (process-exit-status proc))))
              (t))))))))
 
+(defun clution--make-eval-proc (&rest args)
+  (let ((name (or (cl-getf args :name) "*clution-eval-proc*"))
+        (command (append (clution--spawn-repl-command) (clution--spawn-repl-args)))
+        (dir (or (cl-getf args :dir) default-directory))
+        (filter (cl-getf args :filter))
+        (cont (cl-getf args :cont)))
+    (lexical-let* ((cont cont)
+                   (sentinel-value  (format "%dclution-sentinel%d" (random) (random)))
+                   (output "")
+                   (proc
+                    (let ((default-directory dir))
+                      (make-process
+                       :name name
+                       :command command
+                       :sentinel
+                       (lambda (proc event)
+                         (case (process-status proc)
+                           (exit
+                            (set-process-filter proc nil)
+                            (set-process-sentinel proc nil)
+                            (when cont
+                              (run-at-time 0 nil cont nil)))))
+                       :filter
+                       (lambda (proc string)
+                         (setq output (concat output string))
+                         (when (string-match (format "%s" sentinel-value) output)
+                           (set-process-filter proc nil)
+                           (set-process-sentinel proc nil)
+                           (when cont
+                             (run-at-time 0 nil cont proc))))))))
+      (process-send-string
+       proc
+       (format "%S\n"
+               `(cl:progn
+                 (cl:print "")
+                 (cl:finish-output)
+                 (cl:defvar *clution-output* *standard-output*)
+                 (cl:setq cl:*standard-output* (cl:make-broadcast-stream)
+                          cl:*error-output* cl:*standard-output*
+                          cl:*trace-output* cl:*standard-output*
+
+                          cl:*debug-io* (cl:make-two-way-stream (cl:make-string-input-stream "")  cl:*standard-output*)
+                          cl:*query-io* cl:*debug-io*)
+                 (cl:terpri *clution-output*)
+                 (princ ,(format "%s" sentinel-value) *clution-output*)
+                 (cl:terpri *clution-output*)
+                 (cl:finish-output *clution-output*))))
+      proc)))
+
+(defun clution--with-normal-io-form (&rest sexprs)
+  `(cl:let ((cl:*standard-output* *clution-output*)
+            (cl:*error-output* cl:*standard-output*)
+            (cl:*trace-output* cl:*standard-output*)
+            (cl:*debug-io* (cl:make-two-way-stream *standard-input*  cl:*standard-output*))
+            (cl:*query-io* cl:*debug-io*))
+           ,@sexprs))
+
+(defun clution--eval-in-lisp-async (sexpr cont)
+  (lexical-let ((sexpr sexpr)
+                (cont cont)
+                (output ""))
+    (clution--make-eval-proc
+     :cont
+     (lambda (proc)
+       (when proc
+         ;;Set filter
+         (set-process-filter
+          proc
+          (lambda (proc string)
+            (setf output (concat output string))))
+         ;;Set sentinel
+         (set-process-sentinel
+          proc
+          (lambda (proc event)
+            (case (process-status proc)
+              (exit
+               (condition-case err
+                   (let ((res (car (read-from-string output))))
+                     (if (eq (car res) :SUCCESS)
+                         (run-at-time 0 nil cont t (cdr res))
+                       (run-at-time 0 nil cont nil (cdr res))))
+                 (error
+                  (run-at-time 0 nil cont nil nil)))))))
+         (process-send-string
+          proc
+          (format "%S\n"
+                  `(cl:progn
+                    (cl:prin1
+                     (cl:let ((cl:*standard-input* (cl:make-broadcast-stream)))
+                             (cl:handler-case (cl:cons :success ,sexpr)
+                                              (cl:error (err)
+                                                        (cl:cons :fail (cl:princ-to-string err)))))
+                     *clution-output*)
+                    (cl:finish-output *clution-output*)
+                    ,(clution--exit-form 0)))))))))
+
 (defun clution--eval-in-lisp (sexpr)
   "Spin up a fresh lisp and evaluate `sexpr' in it.
 Synchronously waits for evaluation to complete, and returns the result as an elisp sexpr."
-  (lexical-let* ((lisp-proc nil)
-                 (output ""))
-    (unwind-protect
-        (progn
-          (setf
-           lisp-proc
-           (make-process
-            :name "*clution-lisp-eval*"
-            :command (append (clution--spawn-lisp-command) (clution--spawn-lisp-args))
-            :filter
-            (lambda (proc string)
-              (setf output (concat output string)))))
-          (process-send-string
-           lisp-proc
-           (format "%S\n"
-                   `(cl:progn
-                     (cl:prin1
-                      (cl:let ((cl:*standard-input* (cl:make-broadcast-stream))
-                               (cl:*error-output* (cl:make-broadcast-stream))
-                               (cl:*standard-output* (cl:make-broadcast-stream))
-                               (cl:*trace-output* (cl:make-broadcast-stream))
-                               (cl:*debug-io* (cl:make-broadcast-stream))
-                               (cl:*query-io* (cl:make-broadcast-stream)))
-                              (cl:handler-case (cl:cons :success ,sexpr)
-                                               (cl:error (err)
-                                                         (cl:cons :fail (cl:princ-to-string err))))))
-                     (cl:finish-output)
-                     ,(clution--exit-form 0))))
-          (while (process-live-p lisp-proc)
-            (accept-process-output lisp-proc))
-          (let ((res (car (read-from-string output))))
-            (unless (eq (car res) :SUCCESS)
-              (error "clution: error during eval: %S" (cdr res)))
-            (cdr res)))
-      (when lisp-proc
-        (delete-process lisp-proc)))))
+  (lexical-let* ((result nil)
+                 (proc
+                  (clution--eval-in-lisp-async
+                   sexpr
+                   (lambda (success eval-result)
+                     (setq result (cons success eval-result))))))
+    (while (not result)
+      (accept-process-output proc))
+    (if (car result)
+        (cdr result)
+      (error "clution: error during eval: %S" (cdr result)))))
 
 (defun clution--systems-query (systems)
   "Performs a system query operation on each system in `systems' and returns a list of the results."
@@ -1086,29 +1157,6 @@ Returns the window displaying the buffer"
 
 ;;;; Frontend/Backend Lisp access
 
-(defun clution--spawn-lisp-command ()
-  "Command to spawn a lisp in a REL (repl without the print)."
-  (cl-ecase clution-frontend
-    (raw
-     (cl-ecase clution-backend
-       (sbcl (clution--sbcl-command))))
-    (roswell (clution--ros-command))))
-
-(defun clution--spawn-lisp-args ()
-  "Arguments to spawn a lisp in a REL (repl without the print)."
-  (cl-ecase clution-frontend
-    (raw
-     (cl-ecase clution-backend
-       (sbcl
-        '("--noinform" "--disable-ldb" "--lose-on-corruption" "--end-runtime-options"
-          "--noprint" "--disable-debugger"))))
-    (roswell
-     (cl-ecase clution-backend
-       (sbcl
-        '("run" "--lisp" "sbcl-bin" "--"
-          "--noinform" "--disable-ldb" "--lose-on-corruption" "--end-runtime-options"
-          "--noprint" "--disable-debugger"))))))
-
 (defun clution--spawn-script-command ()
   "Command to spawn a lisp which will load a script file, then exit."
   (cl-ecase clution-frontend
@@ -1496,7 +1544,7 @@ Initializes ASDF and loads the selected system."
                 (lambda (system)
                   (clution--append-output
                    (clution--system.name system) ": build starting\n\n")
-                  (let* ((command (append (clution--spawn-lisp-command) (clution--spawn-lisp-args)))
+                  (let* ((command (append (clution--spawn-repl-command) (clution--spawn-repl-args)))
                          (proc
                           (clution--async-proc
                            :command command
@@ -1690,7 +1738,7 @@ Initializes ASDF and loads the selected system."
     (let ((proc
            (clution--async-proc
             :name "*clution-exe-publish-proc*"
-            :command (append (clution--spawn-lisp-command) (clution--spawn-lisp-args))
+            :command (append (clution--spawn-repl-command) (clution--spawn-repl-args))
             :dir (clution--clution.dir clution)
             :filter (lambda (proc string)
                       (clution--append-output string))

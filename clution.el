@@ -1162,28 +1162,34 @@ Returns the window displaying the buffer"
   (cl-ecase clution-frontend
     (raw
      (cl-ecase clution-backend
-       (sbcl (clution--sbcl-command))))
+       (sbcl (clution--sbcl-command))
+       (ccl (clution--ccl-command))))
     (roswell (clution--ros-command))))
 
-(defun clution--spawn-script-args (system)
+(defun clution--spawn-script-args (path)
   "Arguments to spawn a lisp which will load a script file, then exit."
   (cl-ecase clution-frontend
     (raw
      (cl-ecase clution-backend
        (sbcl
         `("--noinform" "--disable-ldb" "--lose-on-corruption" "--end-runtime-options"
-          "--noprint" "--disable-debugger" "--load" ,(clution--system.script-path system) "--eval" "(sb-ext:exit :code 0)"))))
+          "--noprint" "--disable-debugger" "--load" path "--eval" "(sb-ext:exit :code 0)"))
+       (ccl
+        `("--batch" "--quiet" "--load" path "--eval" "(ccl:quit 0)"))))
     (roswell
      (cl-ecase clution-backend
        (sbcl
-        `("run" "--lisp" "sbcl-bin" "--eval" ,(format "%S" (clution--run-form system)) "-q"))))))
+        `("run" "--lisp" "sbcl-bin" "--load" path "--quit"))
+       (ccl
+        `("run" "--lisp" "ccl-bin" "--load" path "--quit"))))))
 
 (defun clution--spawn-repl-command ()
   "Command to spawn a lisp in a REPL."
   (cl-ecase clution-frontend
     (raw
      (cl-ecase clution-backend
-       (sbcl (clution--sbcl-command))))
+       (sbcl (clution--sbcl-command))
+       (ccl (clution--ccl-command))))
     (roswell (clution--ros-command))))
 
 (defun clution--spawn-repl-args ()
@@ -1191,10 +1197,12 @@ Returns the window displaying the buffer"
   (cl-ecase clution-frontend
     (raw
      (cl-ecase clution-backend
-       (sbcl `())))
+       (sbcl '("--noinform"))
+       (ccl '())))
     (roswell
      (cl-ecase clution-backend
-       (sbcl '("run" "--lisp" "sbcl-bin"))))))
+       (sbcl '("run" "--lisp" "sbcl-bin"))
+       (ccl '("run" "--lisp" "ccl-bin"))))))
 
 (defun clution--args-list-form ()
   "An SEXP which when evaluated in the lisp backend will evaluate to the list
@@ -1226,6 +1234,32 @@ the code obtained from evaluating the given `exit-code-form'."
       (error "sbcl not installed"))
 
     (list sbcl-path)))
+
+(defun clution--ccl-command ()
+  (let ((ccl-path
+         (cond
+          ((eq clution-ccl-path 'auto)
+           (let ((search-path exec-path))
+             (when-let ((ccl-home (getenv "CCL_DEFAULT_DIRECTORY")))
+               (setf search-path (append search-path (list (file-name-as-directory ccl-home)))))
+             (or
+              (locate-file "ccl" search-path exec-suffixes 1)
+              (when (eq system-type 'windows-nt)
+                (or (locate-file "wx86cl64" search-path exec-suffixes 1)
+                    (locate-file "wx86cl" search-path exec-suffixes 1)))
+              (when (eq system-type 'darwin)
+                (or (locate-file "dx86cl64" search-path exec-suffixes 1)
+                    (locate-file "dx86cl" search-path exec-suffixes 1)))
+              (locate-file "lx86cl64" search-path exec-suffixes 1)
+              (locate-file "lx86cl" search-path exec-suffixes 1))))
+          (t
+           (and (stringp clution-ccl-path)
+                (file-exists-p clution-ccl-path)
+                clution-ccl-path)))))
+    (unless ccl-path
+      (error "ccl not installed"))
+
+    (list ccl-path)))
 
 (defun clution--ros-command ()
   (let ((ros-path
@@ -1404,7 +1438,7 @@ Initializes ASDF and loads the selected system."
        (make-process
         :name "clution-spawn-script"
         :buffer clution-run-buffer
-        :command (append (clution--spawn-script-command) (clution--spawn-script-args system))
+        :command (append (clution--spawn-script-command) (clution--spawn-script-args (clution--system.script-path system)))
         :connection-type nil
         :noquery nil
         :sentinel
@@ -1441,7 +1475,7 @@ Initializes ASDF and loads the selected system."
                     (clution--spawn-script-command))
                    " "
                    (clution--arglist-to-string
-                    (clution--spawn-script-args system))))))
+                    (clution--spawn-script-args (clution--system.script-path system)))))))
             (set-process-sentinel proc sentinel))))))))
 
 (defun clution--clear-output ()
@@ -2340,7 +2374,8 @@ See `file-notify-add-watch'"
 
 (defcustom clution-backend 'sbcl
   "The backend to use as default for clution."
-  :type '(choice (const :tag "sbcl" sbcl))
+  :type '(choice (const :tag "sbcl" sbcl)
+                 (const :tag "ccl" ccl))
   :group 'clution)
 
 (defcustom clution-run-style 'comint
@@ -2381,6 +2416,12 @@ generated clution files."
 (defcustom clution-sbcl-path 'auto
   "Path to SBCL."
   :type '(choice (const :tag "Automatically find SBCL in PATH and SBCL_HOME." auto)
+                 (file :must-match t :tag "Use the specified path"))
+  :group 'clution)
+
+(defcustom clution-ccl-path 'auto
+  "Path to CCL."
+  :type '(choice (const :tag "Automatically find CCL in PATH and CCL_DEFAULT_DIRECTORY" auto)
                  (file :must-match t :tag "Use the specified path"))
   :group 'clution)
 

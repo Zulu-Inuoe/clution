@@ -306,7 +306,7 @@ Returns the window displaying the buffer"
         (clution--clutex-open-file  (clution--clution.path clution))))
 
     (define-key map (kbd "A") 'clution-add-system)
-    (define-key map (kbd "N") 'clution-create-asd)
+    (define-key map (kbd "N") 'clution-create-system)
     button))
 
 (defun clution--insert-qlfile-button (clution)
@@ -1858,15 +1858,9 @@ Initializes ASDF and loads the selected system."
 
   (let ((success nil))
     (unwind-protect
-        (case (clution--system.type system)
-          (:script
-           (clution--do-script-publish system cont))
-          (:executable
-           (clution--do-exe-publish system cont))
-          (:library
-           ;;nothing tbd atm
-           (when cont
-             (funcall cont))))
+        (if-let ((handler (cdr (assoc (clution--system.type system) clution-publish-alist))))
+            (funcall handler system cont)
+          (error "clution: no publish handler defined for system type '%s'" (clution--system.type system)))
       (unless success
         (setf *clution--current-op* nil)))))
 
@@ -2364,6 +2358,117 @@ See `file-notify-add-watch'"
       (attribute-changed)
       (stopped))))
 
+;;; System templates
+
+(defun clution--insert-system-template (name dir version description author license files depends-on)
+  (insert
+   (format "(defsystem #:%s
+  :name \"%s\"
+  :version \"%s\"
+  :description \"%s\"
+  :author \"%s\"
+  :license \"%s\"
+  :serial t
+"
+           name
+           name
+           version
+           description
+           author
+           license))
+  (insert
+   "  :components
+  (")
+  (let ((first t))
+    (dolist (file files)
+      (if first
+          (setq first nil)
+        (insert "\n   "))
+      (insert (format "(:file \"%s\")" file))))
+  (insert ")
+")
+
+  (insert
+   "  :depends-on
+  (")
+  (let ((first t))
+    (dolist (dep depends-on)
+      (if first
+          (setq first nil)
+        (insert "\n  "))
+      (insert (format "#:%s" dep))))
+  (insert "))
+"))
+
+(defun clution--executable-system-template (path)
+  (let ((name (file-name-base path))
+        (dir (file-name-directory path))
+        (version "0.0.0")
+        (description "")
+        (author (or (and user-full-name user-mail-address
+                         (format "%s <%s>" user-full-name user-mail-address))
+                    user-full-name
+                    ""))
+        (license (cdr (first *clution--licenses-alist*))))
+    ;;Make the asd file
+    (with-temp-file path
+      (clution--insert-system-template name dir version description author license (list "package" "main") '("alexandria")))
+    ;;Make the qlfile
+    (with-temp-file (expand-file-name "qlfile" dir)
+      (insert "ql alexandria :latest
+"))
+
+    ;;Make the package.lisp
+    (let ((package-path (expand-file-name "package.lisp" dir)))
+      (with-temp-file package-path
+        (insert
+         "(in-package #:cl-user)\n\n"
+         (format "(defpackage #:%s
+  (:use #:alexandria #:cl)
+  (:export #:main))"
+                 name))))
+
+    ;;Make the main .lisp
+    (let ((main-path (expand-file-name "main.lisp" dir)))
+      (with-temp-file main-path
+        (insert
+         (format "(in-package #:%s)\n\n" name)
+         (format "(defun main (&rest args)
+  0)
+"))))))
+
+(defun clution--library-system-template (path)
+  (let ((name (file-name-base path))
+        (dir (file-name-directory path))
+        (version "0.0.0")
+        (description "")
+        (author (or (and user-full-name user-mail-address
+                         (format "%s <%s>" user-full-name user-mail-address))
+                    user-full-name
+                    ""))
+        (license (cdr (first *clution--licenses-alist*))))
+    ;;Make the asd file
+    (with-temp-file path
+      (clution--insert-system-template name dir version description author license (list "package" name) '("alexandria")))
+    ;;Make the qlfile
+    (with-temp-file (expand-file-name "qlfile" dir)
+      (insert "ql alexandria :latest"))
+    ;;Make the package.lisp
+    (let ((package-path (expand-file-name "package.lisp" dir)))
+      (with-temp-file package-path
+        (insert
+         "(in-package #:cl-user)\n\n"
+         (format "(defpackage #:%s
+  (:use #:alexandria #:cl)
+  (:export))"
+                 name))))
+
+    ;;Make the main .lisp
+    (let ((main-path (expand-file-name (concat name ".lisp") dir)))
+      (with-temp-file main-path
+        (insert
+         (format "(in-package #:%s)\n\n" name))))))
+
 ;;;; Public interface
 
 ;;; Customization
@@ -2372,6 +2477,12 @@ See `file-notify-add-watch'"
   "Options for clution."
   :prefix "clution-"
   :group 'applications)
+
+(defcustom clution-system-template-alist '((executable . clution--executable-system-template)
+                                           (library . clution--library-system-template))
+  "An alist of publish target handlers."
+  :type '(alist :key-type symbol :value-type function)
+  :group 'clution)
 
 (defcustom clution-frontend 'roswell
   "The frontend to use as default for clution."
@@ -2566,7 +2677,7 @@ generated clution files."
     (define-key map (kbd "q") 'clution-close-clutex)
     (define-key map (kbd "Q") 'clution-close)
     (define-key map (kbd "A") 'clution-add-system)
-    (define-key map (kbd "N") 'clution-create-asd)
+    (define-key map (kbd "N") 'clution-create-system)
     map))
 
 (define-derived-mode clutex-mode special-mode "ClutexMode"
@@ -2759,78 +2870,34 @@ generated clution files."
     (bsd-3-clause . "BSD-3-Clause")
     (cc0 . "CC0")))
 
-(defun clution-create-asd (path &optional open name version description author license)
+(defvar clution--system-type-history nil)
+
+(defun clution-create-system (type name dir &optional open)
   "Create a new clution file at `path'"
   (interactive
    (list
-    (clution--read-file-name "create new system at: ")
+    (intern (completing-read "System type: " (mapcar #'car clution-system-template-alist) nil t nil 'clution--system-type-history))
+    (read-string "System name: ")
+    (read-directory-name "System directory: ")
     t))
 
-  (unless (string-equal (file-name-extension path) "asd")
-    (setf path (concat path ".asd")))
+  (let ((path (expand-file-name (concat name ".asd") dir)))
+    (when (file-exists-p path)
+      (error "clution: system already exists at '%s'" path))
 
-  (when (or (not (file-exists-p path))
-            (y-or-n-p (format "confirm: file '%s' already exists. ovewrite?" path)))
-    (let ((name (file-name-base path))
-          (version (or version "0.0.0"))
-          (description (or description ""))
-          (author (or author
-                      (and user-full-name user-mail-address
-                           (format "%s <%s>" user-full-name user-mail-address))
-                      user-full-name
-                      ""))
-          (license (or (and license (cdr (assoc
-                                          (intern (format "%s" license))
-                                          *clution--licenses-alist*)))
-                       (cdr (first *clution--licenses-alist*))))
-          (dir (file-name-directory path)))
-      (unless (file-exists-p dir)
-        (make-directory dir t))
-      (with-temp-file path
-        (insert
-         (format "(defsystem #:%s
-  :name \"%s\"
-  :version \"%s\"
-  :description \"%s\"
-  :author \"%s\"
-  :license \"%s\"
-  :serial t
-  :components
-  ((:file \"package\")
-   (:file \"%s\"))
-  :depends-on
-  ())
-"
-                 name
-                 name
-                 version
-                 description
-                 author
-                 license
-                 name)))
-      (let ((package-path (expand-file-name "package.lisp" dir)))
-        (with-temp-file package-path
-          (insert
-           "(in-package #:cl-user)\n\n"
-           (format "(defpackage #:%s
-  (:use #:cl)
-  (:export))"
-                   name))))
-      (let ((main-path (expand-file-name (concat name ".lisp") dir)))
-        (with-temp-file main-path
-          (insert
-           (format "(in-package #:%s)\n\n" name)
-           (format "(defun main (&rest args)
-  0)
-"))))))
-
-  (when open
-    (cond
-     (*clution--current-clution*
-      (clution--add-system *clution--current-clution* path))
-     (t
-      (clution-open-asd path)))
-    (select-window (clution--clutex-open-file path))))
+    (if-let ((template-fn (cdr (assoc type clution-system-template-alist))))
+        (progn
+          (unless (file-exists-p dir)
+            (make-directory dir t))
+          (funcall template-fn path))
+      (error "clution: no template vailable for '%s'" type))
+    (when open
+      (cond
+       (*clution--current-clution*
+        (clution--add-system *clution--current-clution* "C:/Users/Zulu/code/clution/tests/exe/test-exe.asd"))
+       (t
+        (clution-open-asd path)))
+      (select-window (clution--clutex-open-file path)))))
 
 (defun clution-add-system (clution path)
   (interactive

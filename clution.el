@@ -42,7 +42,7 @@ Arguments accepted:
                 (funcall cont (process-exit-status proc))))
              (t))))))))
 
-(defun clution--make-eval-proc (&rest args)
+(defun clution--make-eval-proc-async (&rest args)
   (let ((name (or (cl-getf args :name) "*clution-eval-proc*"))
         (command (append (clution--spawn-repl-command) (clution--spawn-repl-args)))
         (dir (or (cl-getf args :dir) default-directory))
@@ -91,6 +91,43 @@ Arguments accepted:
                  (cl:finish-output *clution-output*))))
       proc)))
 
+(defun clution--make-eval-proc (&rest args)
+  (let* ((name (or (cl-getf args :name) "*clution-eval-proc*"))
+         (command (append (clution--spawn-repl-command) (clution--spawn-repl-args)))
+         (dir (or (cl-getf args :dir) default-directory))
+         (sentinel-value  (format "%dclution-sentinel%d" (random) (random)))
+         (output "")
+         (proc
+          (let ((default-directory dir))
+            (make-process
+             :name name
+             :command command
+             :filter
+             (lambda (proc string)
+               (setq output (concat output string)))))))
+    (process-send-string
+     proc
+     (format "%S\n"
+             `(cl:progn
+               (cl:print "")
+               (cl:finish-output)
+               (cl:defvar *clution-output* *standard-output*)
+               (cl:setq cl:*standard-output* (cl:make-broadcast-stream)
+                        cl:*error-output* cl:*standard-output*
+                        cl:*trace-output* cl:*standard-output*
+
+                        cl:*debug-io* (cl:make-two-way-stream (cl:make-string-input-stream "")  cl:*standard-output*)
+                        cl:*query-io* cl:*debug-io*)
+               (cl:terpri *clution-output*)
+               (princ ,(format "%s" sentinel-value) *clution-output*)
+               (cl:terpri *clution-output*)
+               (cl:finish-output *clution-output*))))
+    (while (and (process-live-p proc)
+                (not (string-match (format "%s" sentinel-value) output)))
+      (accept-process-output proc))
+    (set-process-filter proc nil)
+    proc))
+
 (defun clution--with-normal-io-form (&rest sexprs)
   `(cl:let ((cl:*standard-output* *clution-output*)
             (cl:*error-output* cl:*standard-output*)
@@ -103,7 +140,7 @@ Arguments accepted:
   (lexical-let ((sexpr sexpr)
                 (cont cont)
                 (output ""))
-    (clution--make-eval-proc
+    (clution--make-eval-proc-async
      :cont
      (lambda (proc)
        (cond
@@ -148,17 +185,35 @@ Arguments accepted:
 (defun clution--eval-in-lisp (sexpr)
   "Spin up a fresh lisp and evaluate `sexpr' in it.
 Synchronously waits for evaluation to complete, and returns the result as an elisp sexpr."
-  (lexical-let* ((result nil)
-                 (proc
-                  (clution--eval-in-lisp-async
-                   sexpr
-                   (lambda (success eval-result)
-                     (setq result (cons success eval-result))))))
-    (while (not result)
-      (accept-process-output proc))
-    (if (car result)
-        (cdr result)
-      (error "clution: error during eval: %S" (cdr result)))))
+  (lexical-let* ((proc nil)
+                 (output ""))
+    (setf proc (clution--make-eval-proc))
+    (unless (process-live-p proc)
+      (error "clution: error preparing eval process"))
+    (unwind-protect
+        (progn
+          (set-process-filter proc
+                              (lambda (proc string)
+                                (setf output (concat output string))))
+          (process-send-string
+           proc
+           (format "%S\n"
+                   `(cl:progn
+                     (cl:prin1
+                      (cl:let ((cl:*standard-input* (cl:make-broadcast-stream)))
+                              (cl:handler-case (cl:cons :success ,sexpr)
+                                               (cl:error (err)
+                                                         (cl:cons :fail (cl:princ-to-string err)))))
+                      *clution-output*)
+                     (cl:finish-output *clution-output*)
+                     ,(clution--exit-form 0))))
+          (while (process-live-p proc)
+            (accept-process-output proc))
+          (let ((res (car (read-from-string output))))
+            (unless (eq (car res) :SUCCESS)
+              (error "clution: error during eval: %s" (cdr res)))
+            (cdr res)))
+      (delete-process proc))))
 
 (defun clution--systems-query (systems)
   "Performs a system query operation on each system in `systems' and returns a list of the results."

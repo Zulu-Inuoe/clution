@@ -267,10 +267,10 @@ Synchronously waits for evaluation to complete, and returns the result as an eli
   "Perform a system query operation on `system' and returns the result."
   (car (clution--systems-query (list system))))
 
-(defun clution--add-system (clution path)
+(defun clution--add-system (clution path type)
   "Adds the system at `path' to the given `clution'"
   (let ((system (clution--make-system
-                 (list :path path))))
+                 (list :path path :type type))))
     (clution--clution.add-system clution system))
   (clution--save-clution clution))
 
@@ -583,6 +583,9 @@ Returns the window displaying the buffer"
             (read-file-name prompt (file-name-directory path) default-filename nil initial predicate)))
     path))
 
+(defun clution--read-system-type (prompt)
+  (intern (completing-read "System type: " (mapcar #'car clution-system-template-alist) nil t nil 'clution--system-type-history)))
+
 (defun clution--app-data-dir ()
   "Directory for storing per-user clution data files."
   (file-name-as-directory
@@ -889,7 +892,7 @@ Returns the window displaying the buffer"
       (setf (getf cuo :clution) res))
     res))
 
-(defun clution--make-asd-clution (asd-path)
+(defun clution--make-asd-clution (asd-path type)
   (let* ((asd-dir (file-name-directory asd-path))
          (asd-clution-dir
           (file-name-as-directory
@@ -914,7 +917,7 @@ Returns the window displaying the buffer"
             :qlfile-libs-dir nil)))
 
       (let ((sys (clution--make-system
-                  (list :path asd-path)
+                  (list :path asd-path :type type)
                   res)))
         (setf (cl-getf res :systems) (list sys))
         (setf (cl-getf sys :system-query) (clution--system-query sys)))
@@ -2480,7 +2483,8 @@ See `file-notify-add-watch'"
          "(in-package #:cl-user)\n\n"
          (format "(defpackage #:%s
   (:use #:alexandria #:cl)
-  (:export #:main))"
+  (:export
+    #:main))"
                  name))))
 
     ;;Make the main .lisp
@@ -2533,8 +2537,8 @@ See `file-notify-add-watch'"
   :prefix "clution-"
   :group 'applications)
 
-(defcustom clution-system-template-alist '((executable . clution--executable-system-template)
-                                           (library . clution--library-system-template))
+(defcustom clution-system-template-alist '((:executable . clution--executable-system-template)
+                                           (:library . clution--library-system-template))
   "An alist of publish target handlers."
   :type '(alist :key-type symbol :value-type function)
   :group 'clution)
@@ -2931,7 +2935,7 @@ generated clution files."
   "Create a new clution file at `path'"
   (interactive
    (list
-    (intern (completing-read "System type: " (mapcar #'car clution-system-template-alist) nil t nil 'clution--system-type-history))
+    (clution--read-system-type "System type: ")
     (read-string "System name: ")
     (read-directory-name "System directory: ")
     t))
@@ -2949,14 +2953,15 @@ generated clution files."
     (when open
       (cond
        (*clution--current-clution*
-        (clution--add-system *clution--current-clution* "C:/Users/Zulu/code/clution/tests/exe/test-exe.asd"))
+        (clution--add-system *clution--current-clution* path type))
        (t
-        (clution-open-asd path)))
+        (clution-open-asd path type)))
       (select-window (clution--clutex-open-file path)))))
 
-(defun clution-add-system (clution path)
+(defun clution-add-system (clution path type)
   (interactive
    (list *clution--current-clution*
+         nil
          nil))
   (cond
    ((not clution)
@@ -2964,6 +2969,8 @@ generated clution files."
    (t
     (when (and (not path) (interactive-p))
       (setf path (clution--read-file-name "add existing system to clution: " nil nil t)))
+    (when (and (not type) (interactive-p))
+      (setf type (clution--read-system-type "System type: ")))
     (clution--add-system clution path))))
 
 (defun clution-set-qlfile (path)
@@ -3010,18 +3017,31 @@ generated clution files."
 
   (run-hooks 'clution-open-hook))
 
-(defun clution-open-asd (path)
+(defun clution-open-asd (path type)
   "Opens `path' and sets it as the current clution."
   (interactive
-   (list (clution--read-file-name "asd to open: " nil nil t)))
+   (list (clution--read-file-name "asd to open: " nil nil t)
+         nil))
 
   (when *clution--current-clution*
     (clution-close))
 
   (let* ((path (expand-file-name path))
-         (clution (clution--make-asd-clution path)))
-    (clution--save-clution clution)
-    (clution-open (clution--clution.path clution))))
+         (asd-clution-dir
+          (file-name-as-directory
+           (expand-file-name
+            (file-name-base path)
+            (clution--asd-clution-dir))))
+         (asd-clution-path
+          (expand-file-name
+           (concat (file-name-base path) ".clu")
+           asd-clution-dir)))
+    (unless (file-exists-p asd-clution-path)
+      (unless type
+        (setf type (clution--read-system-type "System type: ")))
+      (let ((clution (clution--make-asd-clution path type)))
+        (clution--save-clution clution)))
+    (clution-open asd-clution-path)))
 
 (defun clution-close ()
   "Close the currently open clution, ending a repl if it is active."

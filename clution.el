@@ -106,7 +106,8 @@ Arguments accepted:
     (clution--make-eval-proc
      :cont
      (lambda (proc)
-       (when proc
+       (cond
+        ((process-live-p proc)
          ;;Set filter
          (set-process-filter
           proc
@@ -120,11 +121,13 @@ Arguments accepted:
               (exit
                (condition-case err
                    (let ((res (car (read-from-string output))))
-                     (if (eq (car res) :SUCCESS)
-                         (run-at-time 0 nil cont t (cdr res))
-                       (run-at-time 0 nil cont nil (cdr res))))
+                     (when cont
+                       (if (eq (car res) :SUCCESS)
+                           (run-at-time 0 nil cont t (cdr res))
+                         (run-at-time 0 nil cont nil (cdr res)))))
                  (error
-                  (run-at-time 0 nil cont nil nil)))))))
+                  (when cont
+                    (run-at-time 0 nil cont nil nil))))))))
          (process-send-string
           proc
           (format "%S\n"
@@ -136,7 +139,11 @@ Arguments accepted:
                                                         (cl:cons :fail (cl:princ-to-string err)))))
                      *clution-output*)
                     (cl:finish-output *clution-output*)
-                    ,(clution--exit-form 0)))))))))
+                    ,(clution--exit-form 0)))))
+        (t
+         ;;Failed to start process or errored during setup
+         (when cont
+           (run-at-time 0 nil cont nil nil))))))))
 
 (defun clution--eval-in-lisp (sexpr)
   "Spin up a fresh lisp and evaluate `sexpr' in it.

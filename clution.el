@@ -37,7 +37,7 @@ Arguments accepted:
        (lexical-let ((cont cont))
          (lambda (proc event)
            (cl-case (process-status proc)
-             (exit
+             ((exit closed failed)
               (when cont
                 (funcall cont (process-exit-status proc))))
              (t))))))))
@@ -2394,7 +2394,7 @@ clutions if `clution-auto-open' is enabled, and there is not already one active.
      ((string-match-p "^clu$" (file-name-extension path))
       (clution-open path))
      ((string-match-p "^asd$" (file-name-extension path))
-      (clution-open-asd path)))))
+      (clution-open-asd path nil)))))
 
 (defun clution--file-watch-callback (event)
   "Callback whenever the current clution's file changes.
@@ -2971,7 +2971,7 @@ generated clution files."
       (setf path (clution--read-file-name "add existing system to clution: " nil nil t)))
     (when (and (not type) (interactive-p))
       (setf type (clution--read-system-type "System type: ")))
-    (clution--add-system clution path))))
+    (clution--add-system clution path type))))
 
 (defun clution-set-qlfile (path)
   (interactive

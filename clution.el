@@ -1238,15 +1238,15 @@ Returns the window displaying the buffer"
      (cl-ecase clution-backend
        (sbcl
         `("--noinform" "--disable-ldb" "--lose-on-corruption" "--end-runtime-options"
-          "--noprint" "--disable-debugger" "--load" path "--eval" "(sb-ext:exit :code 0)"))
+          "--noprint" "--disable-debugger" "--load" ,path "--eval" "(sb-ext:exit :code 0)"))
        (ccl
-        `("--batch" "--quiet" "--load" path "--eval" "(ccl:quit 0)"))))
+        `("--batch" "--quiet" "--load" ,path "--eval" "(ccl:quit 0)"))))
     (roswell
      (cl-ecase clution-backend
        (sbcl
-        `("run" "--lisp" "sbcl-bin" "--load" path "--quit"))
+        `("run" "--lisp" "sbcl-bin" "--load" ,path "--quit"))
        (ccl
-        `("run" "--lisp" "ccl-bin" "--load" path "--quit"))))))
+        `("run" "--lisp" "ccl-bin" "--load" ,path "--quit"))))))
 
 (defun clution--spawn-repl-command ()
   "Command to spawn a lisp in a REPL."

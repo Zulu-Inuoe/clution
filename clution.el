@@ -46,7 +46,6 @@ Arguments accepted:
   (let ((name (or (cl-getf args :name) "*clution-eval-proc*"))
         (command (append (clution--spawn-repl-command) (clution--spawn-repl-args)))
         (dir (or (cl-getf args :dir) default-directory))
-        (filter (cl-getf args :filter))
         (cont (cl-getf args :cont)))
     (lexical-let* ((cont cont)
                    (sentinel-value  (format "%dclution-sentinel%d" (random) (random)))
@@ -1293,7 +1292,7 @@ Returns the window displaying the buffer"
 of command-line arguments"
   (cl-ecase clution-backend
     (t
-     'uiop:*command-line-arguments*)))
+     '(uiop:raw-command-line-arguments))))
 
 (defun clution--exit-form (exit-code-form)
   "A SEXP which when evaluated in the lisp backend, will exit the program with
@@ -1452,7 +1451,7 @@ Initializes ASDF and loads the selected system, then calls its toplevel."
   (let ((clution (clution--system.clution system))
         (system-name (clution--system.name system))
         (toplevel (clution--system.toplevel system))
-        (args (clution--system.args system)))
+        (args (list* nil (clution--system.args system))))
     `(cl:progn
       (cl:handler-case
        (cl:progn
@@ -1735,11 +1734,11 @@ Initializes ASDF and loads the selected system."
      "Bundling clution systems...\n")
     (make-directory out-systems-dir t)
     (dolist (system (clution--clution.systems clution))
-      (let ((system-name (clution--system.name system))
-            (system-path (clution--system.path system))
-            (system-dir (clution--system.dir system))
-            (system-out-dir (file-name-as-directory
-                             (expand-file-name system-name out-systems-dir))))
+      (let* ((system-name (clution--system.name system))
+             (system-path (clution--system.path system))
+             (system-dir (clution--system.dir system))
+             (system-out-dir (file-name-as-directory
+                              (expand-file-name system-name out-systems-dir))))
         (clution--append-output
          "\n\tBundling '" system-name "'")
         (cl-labels ((recurse (node)
@@ -1771,7 +1770,7 @@ Initializes ASDF and loads the selected system."
      (pp-to-string
       `(progn
          (eval-when (:compile-toplevel :load-toplevel :execute)
-           (handler-bind
+           (handler-case
                (require 'asdf)
              (error (e)
                     (format *error-output* "Error requiring ASDF:~%~T~A" e)
@@ -2503,7 +2502,7 @@ See `file-notify-add-watch'"
          (format "(defpackage #:%s
   (:use #:alexandria #:cl)
   (:export
-    #:main))"
+    #:main))\n"
                  name))))
 
     ;;Make the main .lisp
@@ -2538,7 +2537,7 @@ See `file-notify-add-watch'"
          "(in-package #:cl-user)\n\n"
          (format "(defpackage #:%s
   (:use #:alexandria #:cl)
-  (:export))"
+  (:export))\n"
                  name))))
 
     ;;Make the main .lisp

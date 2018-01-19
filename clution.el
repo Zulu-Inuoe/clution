@@ -1335,29 +1335,19 @@ Returns the window displaying the buffer"
 
 (defun clution--spawn-script-command ()
   "Command to spawn a lisp which will load a script file, then exit."
-  (cl-ecase clution-frontend
-    (raw
-     (cl-ecase clution-backend
-       (sbcl (clution--sbcl-command))
-       (ccl (clution--ccl-command))))
-    (roswell (clution--ros-command))))
+  (cl-ecase clution-backend
+    (sbcl (clution--sbcl-command))
+    (ccl (clution--ccl-command))))
 
 (defun clution--spawn-script-args (path)
   "Arguments to spawn a lisp which will load a script file, then exit."
-  (cl-ecase clution-frontend
-    (raw
-     (cl-ecase clution-backend
-       (sbcl
-        `("--noinform" "--disable-ldb" "--lose-on-corruption" "--end-runtime-options"
-          "--noprint" "--disable-debugger" "--load" ,path "--eval" "(sb-ext:exit :code 0)"))
-       (ccl
-        `("--batch" "--quiet" "--load" ,path "--eval" "(ccl:quit 0)"))))
-    (roswell
-     (cl-ecase clution-backend
-       (sbcl
-        `("run" "--lisp" "sbcl-bin" "--load" ,path "--quit"))
-       (ccl
-        `("run" "--lisp" "ccl-bin" "--load" ,path "--quit"))))))
+  (cl-ecase clution-backend
+    (sbcl
+     `("--noinform" "--disable-ldb" "--lose-on-corruption" "--end-runtime-options"
+       "--noprint" "--disable-debugger" "--load" ,path "--eval" "(sb-ext:exit :code 0)"
+       "--end-toplevel-options"))
+    (ccl
+     `("--batch" "--quiet" "--load" ,path "--eval" "(ccl:quit 0)" "--"))))
 
 (defun clution--spawn-repl-command ()
   "Command to spawn a lisp in a REPL."

@@ -2648,6 +2648,12 @@ See `file-notify-add-watch'"
   :prefix "clution-"
   :group 'applications)
 
+(defcustom clution-publish-alist '((:executable . clution--do-exe-publish)
+                                   (:script . clution--do-script-publish))
+  "An alist of publish target handlers."
+  :type '(alist :key-type symbol :value-type function)
+  :group 'clution)
+
 (defcustom clution-system-template-alist '((:executable . clution--executable-system-template)
                                            (:library . clution--library-system-template))
   "An alist of publish target handlers."

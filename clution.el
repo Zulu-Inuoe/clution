@@ -33,7 +33,7 @@
     (setf *clution--cl-clution-result*
           (condition-case err
               (let ((res (car (read-from-string *clution--cl-clution-output* 0 match-pos))))
-                (if (eq (car res) :SUCCESS)
+                (if (eq (car res) :success)
                     (cons t (cdr res))
                   (cons nil (cdr res))))
             (error
@@ -122,9 +122,9 @@ Arguments accepted:
                                            (list
                                             :system system
                                             :parent parent
-                                            :name (cl-getf component-plist :NAME)
-                                            :type (intern (downcase (symbol-name (cl-getf component-plist :TYPE))))
-                                            :path (cl-getf component-plist :PATHNAME)
+                                            :name (cl-getf component-plist :name)
+                                            :type (cl-getf component-plist :type)
+                                            :path (cl-getf component-plist :pathname)
                                             :children nil)))
                                      (setf (cl-getf component-node :children)
                                            (cl-mapcar
@@ -132,16 +132,16 @@ Arguments accepted:
                                                           (system system))
                                               (lambda (c)
                                                 (translate-component-plist system component-node c)))
-                                            (cl-getf component-plist :COMPONENTS)))
+                                            (cl-getf component-plist :components)))
                                      component-node)))
     (let ((system-node
            (list
             :system system
             :parent nil
-            :name (cl-getf system-plist :NAME)
+            :name (cl-getf system-plist :name)
             :type :module
-            :depends-on (cl-getf system-plist :DEPENDS-ON)
-            :path (cl-getf system-plist :PATHNAME)
+            :depends-on (cl-getf system-plist :depends-on)
+            :path (cl-getf system-plist :pathname)
             :children nil)))
       (setf (getf system-node :children)
             (cl-mapcar
@@ -149,7 +149,7 @@ Arguments accepted:
                            (system system))
                (lambda (child-plist)
                  (translate-component-plist system system-node child-plist)))
-             (cl-getf system-plist :COMPONENTS)))
+             (cl-getf system-plist :components)))
       system-node)))
 
 (defun clution--system-query (system)
@@ -172,23 +172,66 @@ See `clution--clution.selected-system'"
     (clution--save-cuo cuo (clution--cuo.path cuo)))
   (clution--sync-buffers *clution--current-clution*))
 
-(defun clution--remove-system (system &optional delete)
+(defun clution--remove-system (system)
   "Remove `system' from its clution.
 When `delete' is non-nil, delete that system from disk."
   (let ((clution (clution--system.clution system)))
     (unless clution
-      (error "system has no parent clution"))
-    (clution--clution.remove-system clution system)
-    (clution--save-clution clution)))
+      (error "clution: system has no parent clution"))
+    (when (y-or-n-p (format "confirm: Remove system '%s'" (clution--system.name system)))
+      (clution--clution.remove-system clution system)
+      (clution--save-clution clution))))
 
-(defun clution--add-system-item (node))
+(defun clution--add-system-file (node)
+  (let* ((system (clution--node.system node))
+         (system-path (clution--system.path system))
+         (dir (clution--node.path node))
+         (node-id (clution--node.node-id node))
+         (file (clution--read-file-name "file to add: " dir nil t)))
+    (unless (string-equal (file-name-extension file) "lisp")
+      (error "file is not a lisp file: '%s'" file))
 
-(defun clution--create-system-item (node))
+    ;;Make sure module dir exists
+    (unless (file-exists-p dir)
+      (make-directory dir t))
+
+    ;;Copy the file over
+    (let ((new-name (expand-file-name (file-name-nondirectory file) dir)))
+      (cond
+       ((or (not (file-exists-p new-name))
+            (y-or-n-p "a file with the name '%s' already exists. overwrite?" (file-name-nondirectory file)))
+        (copy-file file new-name t t)
+        (clution--cl-clution-eval
+         `(add-file-component ',system-path ',node-id ',(file-name-base file)))
+        (clution--update-system-query system)
+        (clution--sync-buffers *clution--current-clution*))
+       (t ;;try again
+        (clution--add-system-file node))))))
+
+(defun clution--create-system-file (node)
+  )
+
+(defun clution--create-system-module (node)
+  (let* ((system (clution--node.system node))
+         (system-path (clution--system.path system))
+         (dir (clution--node.path node))
+         (node-id (clution--node.node-id node))
+         (module (read-string "module to add: ")))
+
+    ;;Create the directory if it does not exist
+    (let ((dir-name (file-name-as-directory (expand-file-name module dir))))
+      (unless (file-exists-p dir-name)
+        (make-directory dir-name t)))
+
+    (clution--cl-clution-eval
+     `(add-module-component ',system-path ',node-id ',module))
+
+    (clution--update-system-query system)
+    (clution--sync-buffers *clution--current-clution*)))
 
 (defun clution--rename-system-item (node)
   (let ((new-name
          (read-string (format "'%s' rename to: " (clution--node.name node)))))
-    (clution--cl-clution-eval `(rename-component ,(clution--system.path (clution--node.system node)) ',(clution--node.node-id node) ,new-name))
     (cl-case (clution--node.type node)
       (:file
        (let* ((old-path (clution--node.path node))
@@ -205,6 +248,7 @@ When `delete' is non-nil, delete that system from disk."
                  new-name
                  (file-name-directory old-path)))))
          (rename-file old-path new-path))))
+    (clution--cl-clution-eval `(rename-component ,(clution--system.path (clution--node.system node)) ',(clution--node.node-id node) ,new-name))
     (clution--update-system-query (clution--node.system node))
     (clution--sync-buffers *clution--current-clution*)))
 
@@ -217,8 +261,10 @@ When `delete' is non-nil, delete that system from disk."
       (clution--sync-buffers *clution--current-clution*)))
    (t
     (when (y-or-n-p (format "confirm: Permanently delete component '%s'" (clution--node.name node)))
+      (if (directory-name-p (clution--node.path node))
+          (delete-directory (clution--node.path node) t)
+        (delete-file (clution--node.path node)))
       (clution--cl-clution-eval `(remove-component ,(clution--system.path (clution--node.system node)) ',(clution--node.node-id node)))
-      (delete-file (clution--node.path node))
       (clution--update-system-query (clution--node.system node))
       (clution--sync-buffers *clution--current-clution*)))))
 
@@ -292,6 +338,37 @@ Returns the window displaying the buffer"
 
     (define-key map (kbd "A") 'clution-add-system)
     (define-key map (kbd "N") 'clution-create-system)
+
+    (let ((mouse-menu (make-sparse-keymap)))
+      (define-key map (kbd "<mouse-3>")
+        mouse-menu)
+
+      (define-key-after mouse-menu [build]
+        '(menu-item "Build" clution-build))
+      (define-key-after mouse-menu [clean]
+        '(menu-item "Clean" clution-clean))
+      (define-key-after mouse-menu [publish]
+        '(menu-item "Publish" clution-publish))
+
+      (define-key-after mouse-menu [separator-add]
+        '(menu-item "--"))
+
+      (let ((add-menu (make-sparse-keymap)))
+        (define-key-after mouse-menu [add]
+          `(menu-item "Add" ,add-menu))
+        (define-key-after (lookup-key mouse-menu [add]) [add-system]
+          '(menu-item "Existing System..." clution-add-system))
+        (define-key-after (lookup-key mouse-menu [add]) [create-system]
+          '(menu-item "New System..." clution-create-system)))
+
+      (define-key-after mouse-menu [separator-open]
+        '(menu-item "--"))
+
+      (define-key-after mouse-menu [open]
+        `(menu-item "Open"
+                    ,(lambda ()
+                       (interactive)
+                       (clution--clutex-open-file (clution--clution.path clution))))))
     button))
 
 (defun clution--insert-qlfile-button (clution)
@@ -357,33 +434,19 @@ Returns the window displaying the buffer"
     (define-key fold-map (kbd "<delete>")
       (lambda ()
         (interactive)
-        (when (y-or-n-p (format "confirm: Remove system '%s'" (clution--system.name system)))
-          (clution--remove-system system nil))))
+        (clution--remove-system system)))
     (define-key map (kbd "<delete>")
       (lambda ()
         (interactive)
-        (when (y-or-n-p (format "confirm: Remove system '%s'" (clution--system.name system)))
-          (clution--remove-system system nil))))
+        (clution--remove-system system)))
     (define-key fold-map (kbd "D")
       (lambda ()
         (interactive)
-        (when (y-or-n-p (format "confirm: Remove system '%s'" (clution--system.name system)))
-          (clution--remove-system system nil))))
+        (clution--remove-system system)))
     (define-key map (kbd "D")
       (lambda ()
         (interactive)
-        (when (y-or-n-p (format "confirm: Remove system '%s'" (clution--system.name system)))
-          (clution--remove-system system nil))))
-    (define-key fold-map (kbd "S-<delete>")
-      (lambda ()
-        (interactive)
-        (when (y-or-n-p (format "confirm: Permanently delete system '%s'" (clution--system.name system)))
-          (clution--remove-system system t))))
-    (define-key map (kbd "S-<delete>")
-      (lambda ()
-        (interactive)
-        (when (y-or-n-p (format "confirm: Permanently delete system '%s'" (clution--system.name system)))
-          (clution--remove-system system t))))
+        (clution--remove-system system)))
     (define-key fold-map (kbd "S")
       (lambda ()
         (interactive)
@@ -403,19 +466,101 @@ Returns the window displaying the buffer"
     (define-key fold-map (kbd "A")
       (lambda ()
         (interactive)
-        (clution--add-system-item system)))
+        (clution--add-system-file node)))
     (define-key map (kbd "A")
       (lambda ()
         (interactive)
-        (clution--add-system-item system)))
+        (clution--add-system-file node)))
     (define-key fold-map (kbd "N")
       (lambda ()
         (interactive)
-        (clution--create-system-item system)))
+        (clution--create-system-file node)))
     (define-key map (kbd "N")
       (lambda ()
         (interactive)
-        (clution--create-system-item system)))
+        (clution--create-system-file system)))
+    (define-key fold-map (kbd "C-N")
+      (lambda ()
+        (interactive)
+        (clution--create-system-module node)))
+    (define-key map (kbd "C-N")
+      (lambda ()
+        (interactive)
+        (clution--create-system-module system)))
+
+    (let ((mouse-menu (make-sparse-keymap)))
+      (define-key map (kbd "<mouse-3>")
+        mouse-menu)
+      (define-key fold-map (kbd "<mouse-3>")
+        mouse-menu)
+
+      (define-key-after mouse-menu [build]
+        `(menu-item "Build"
+                    ,(lambda ()
+                       (interactive)
+                       (clution--clear-output)
+                       (clution--do-build (list system)))))
+      (define-key-after mouse-menu [clean]
+        `(menu-item "Clean"
+                    ,(lambda ()
+                       (interactive)
+                       (clution--clear-output)
+                       (clution--do-clean (list system)))))
+      (define-key-after mouse-menu [publish]
+        `(menu-item "Publish"
+                    ,(lambda ()
+                       (interactive)
+                       (clution--clear-output)
+                       (clution--do-publish system))))
+
+      (define-key-after mouse-menu [separator-add]
+        '(menu-item "--"))
+
+      (let ((add-menu (make-sparse-keymap)))
+        (define-key-after mouse-menu [add]
+          `(menu-item "Add" ,add-menu))
+        (define-key-after (lookup-key mouse-menu [add]) [create-file]
+          `(menu-item "New file..."
+                      ,(lambda ()
+                         (interactive)
+                         (clution--create-system-file node))))
+        (define-key-after (lookup-key mouse-menu [add]) [add-file]
+          `(menu-item "Existing file..."
+                      ,(lambda ()
+                         (interactive)
+                         (clution--add-system-file node))))
+        (define-key-after (lookup-key mouse-menu [add]) [create-module]
+          `(menu-item "New module..."
+                      ,(lambda ()
+                         (interactive)
+                         (clution--create-system-module node)))))
+
+      (define-key-after mouse-menu [separator-select]
+        '(menu-item "--"))
+
+      (define-key-after mouse-menu [select]
+        `(menu-item "Set as Selected System"
+                    ,(lambda ()
+                       (interactive)
+                       (clution--select-system system))))
+
+      (define-key-after mouse-menu [separator-delete]
+        '(menu-item "--"))
+
+      (define-key-after mouse-menu [delete]
+        `(menu-item "Remove"
+                    ,(lambda ()
+                       (interactive)
+                       (clution--remove-system system))))
+
+      (define-key-after mouse-menu [separator-open]
+        '(menu-item "--"))
+
+      (define-key-after mouse-menu [open]
+        `(menu-item "Open"
+                    ,(lambda ()
+                       (interactive)
+                       (clution--clutex-open-file (clution--system.path system))))))
     button))
 
 (defun clution--insert-parent-button (parent)
@@ -486,19 +631,27 @@ Returns the window displaying the buffer"
     (define-key fold-map (kbd "A")
       (lambda ()
         (interactive)
-        (clution--add-system-item parent)))
+        (clution--add-system-file parent)))
     (define-key map (kbd "A")
       (lambda ()
         (interactive)
-        (clution--add-system-item parent)))
+        (clution--add-system-file parent)))
     (define-key fold-map (kbd "N")
       (lambda ()
         (interactive)
-        (clution--create-system-item parent)))
+        (clution--create-system-file parent)))
     (define-key map (kbd "N")
       (lambda ()
         (interactive)
-        (clution--create-system-item parent)))
+        (clution--create-system-file parent)))
+    (define-key fold-map (kbd "C-N")
+      (lambda ()
+        (interactive)
+        (clution--create-system-module parent)))
+    (define-key map (kbd "C-N")
+      (lambda ()
+        (interactive)
+        (clution--create-system-module parent)))
     (define-key fold-map (kbd "R")
       (lambda ()
         (interactive)
@@ -507,6 +660,42 @@ Returns the window displaying the buffer"
       (lambda ()
         (interactive)
         (clution--rename-system-item parent)))
+
+    (let ((mouse-menu (make-sparse-keymap)))
+      (define-key map (kbd "<mouse-3>")
+        mouse-menu)
+      (define-key fold-map (kbd "<mouse-3>")
+        mouse-menu)
+
+      (let ((add-menu (make-sparse-keymap)))
+        (define-key-after mouse-menu [add]
+          `(menu-item "Add" ,add-menu))
+
+        (define-key-after (lookup-key mouse-menu [add]) [create-file]
+          `(menu-item "New file..."
+                      ,(lambda ()
+                         (interactive)
+                         (clution--create-system-file parent))))
+
+        (define-key-after (lookup-key mouse-menu [add]) [add-file]
+          `(menu-item "Existing file..."
+                      ,(lambda ()
+                         (interactive)
+                         (clution--add-system-file parent))))
+        (define-key-after (lookup-key mouse-menu [add]) [create-module]
+          `(menu-item "New module..."
+                      ,(lambda ()
+                         (interactive)
+                         (clution--create-system-module parent)))))
+
+      (define-key-after mouse-menu [separator-delete]
+        '(menu-item "--"))
+
+      (define-key-after mouse-menu [delete]
+        `(menu-item "Delete"
+                    ,(lambda ()
+                       (interactive)
+                       (clution--remove-system-item parent t)))))
     button))
 
 (defun clution--insert-child-button (child)
@@ -541,15 +730,43 @@ Returns the window displaying the buffer"
     (define-key map (kbd "A")
       (lambda ()
         (interactive)
-        (clution--add-system-item (clution--node.parent child))))
+        (clution--add-system-file (clution--node.parent child))))
     (define-key map (kbd "N")
       (lambda ()
         (interactive)
-        (clution--create-system-item (clution--node.parent child))))
+        (clution--create-system-file (clution--node.parent child))))
+    (define-key map (kbd "C-N")
+      (lambda ()
+        (interactive)
+        (clution--create-system-module (clution--node.parent child))))
     (define-key map (kbd "R")
       (lambda ()
         (interactive)
         (clution--rename-system-item child)))
+
+    (let ((mouse-menu (make-sparse-keymap)))
+      (define-key map (kbd "<mouse-3>")
+        mouse-menu)
+
+      (define-key-after mouse-menu [open]
+        `(menu-item "Open"
+                    ,(lambda ()
+                       (interactive)
+                       (clution--clutex-open-file (clution--node.path child)))))
+
+      (define-key-after mouse-menu [separator-delete]
+        '(menu-item "--"))
+
+      (define-key-after mouse-menu [delete]
+        `(menu-item "Delete"
+                    ,(lambda ()
+                       (interactive)
+                       (clution--remove-system-item child t))))
+      (define-key-after mouse-menu [rename]
+        `(menu-item "Rename"
+                    ,(lambda ()
+                       (interactive)
+                       (clution--rename-system-item child)))))
     button))
 
 (defun clution--insert-nodes (nodes indent)
@@ -1754,7 +1971,11 @@ Initializes ASDF and loads the selected system."
                                  (copy-file path new-path nil t nil nil)))
                                (cl-mapc #'recurse (clution--node.children node)))
                              (clution--node.path node)))
-          (recurse (clution--system.query-node system)))))
+          (recurse (clution--system.query-node system))
+          ;;Copy the asd itself
+          (copy-file system-path
+                     (expand-file-name (file-name-nondirectory system-path) system-out-dir)
+                     nil t nil nil))))
     (clution--append-output
      "\n\nFinished bundling clution systems\n\n")
 

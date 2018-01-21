@@ -20,6 +20,32 @@
         (select (lambda (s) (system-plist s asd-path)))
         (to-list))))
 
+(defun add-file-component (asd-path component-path component-name
+                           &aux
+                           (system-name (first component-path)))
+  (declare (ignore system-name))
+  (when-let* ((asd (read-asd-file asd-path))
+              ;;TODO need to find system by name
+              (system (efirst (asd-file-systems asd))))
+    (system-add-file-component system (cdr component-path) component-name)
+    ;;Spit out the new system file
+    (with-output-to-file (stream asd-path :if-exists :supersede :external-format :utf-8)
+      (write-asd-file asd stream))
+    t))
+
+(defun add-module-component (asd-path component-path component-name
+                             &aux
+                               (system-name (first component-path)))
+  (declare (ignore system-name))
+  (when-let* ((asd (read-asd-file asd-path))
+              ;;TODO need to find system by name
+              (system (efirst (asd-file-systems asd))))
+    (system-add-module-component system (cdr component-path) component-name)
+    ;;Spit out the new system file
+    (with-output-to-file (stream asd-path :if-exists :supersede :external-format :utf-8)
+      (write-asd-file asd stream))
+    t))
+
 (defun rename-component (asd-path component-path new-name
                          &aux
                            (system-name (first component-path)))
@@ -62,7 +88,8 @@
            (*trace-output* *standard-output*)
            (*debug-io* (make-two-way-stream *standard-input*  *standard-output*))
            (*query-io* *debug-io*)
-           (*package* (find-package "CL-CLUTION")))
+           (*package* (find-package "CL-CLUTION"))
+           (*print-case* :downcase))
       ;;Start the repl
       (let (form result)
         (loop

@@ -1,10 +1,10 @@
 (eval-when
     (:compile-toplevel :load-toplevel :execute)
   (handler-bind ((error (lambda (e)
-                           (format *error-output* "Error requiring ASDF:~%~T~A~%" e))))
+                           (format *error-output* "Error requiring ASDF:~%~T~A" e))))
     (require 'asdf))
   (handler-bind ((error (lambda (e)
-                          (format *error-output* "Error requiring UIOP:~%~T~A~%" e))))
+                          (format *error-output* "Error requiring UIOP:~%~T~A" e))))
     (require 'uiop)))
 (eval-when
     (:compile-toplevel :load-toplevel :execute)

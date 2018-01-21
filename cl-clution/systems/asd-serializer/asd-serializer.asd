@@ -17,6 +17,8 @@
   :components
   ((:file "package")
    (:file "util")
+   (:file "lexer")
+   (:file "parser")
    (:file "asd-serializer"))
   :depends-on
   (#:alexandria

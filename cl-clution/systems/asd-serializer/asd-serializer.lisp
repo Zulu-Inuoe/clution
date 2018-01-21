@@ -40,12 +40,21 @@
      ;;TODO
      )))
 
-(defun %coerce-path-string (path &optional type)
+(defun %coerce-path-string-file (path &optional type)
   (etypecase path
     (sexp-symbol-node
-     (namestring (make-pathname :type type :defaults (string-downcase (symbol-node-name path)))))
+     (make-pathname :name (string-downcase (symbol-node-name path)) :type "lisp"))
     (sexp-string-node
-     (namestring (make-pathname :type type :defaults (string-node-string path))))
+     (make-pathname :name (string-node-string path) :type "lisp"))
+    ;;TODO need pathname handling
+    ))
+
+(defun %coerce-path-string-module (path &optional type)
+  (etypecase path
+    (sexp-symbol-node
+     (make-pathname :directory (list :relative (string-downcase (symbol-node-name path)))))
+    (sexp-string-node
+     (make-pathname :directory (list :relative (string-node-string path))))
     ;;TODO need pathname handling
     ))
 
@@ -293,14 +302,19 @@
   (let ((plist (list))
         (pathname
           (namestring
-           (uiop:merge-pathnames*
-            (or
-             (%coerce-path-string
-              (or
-               (component-pathname component)
-               (component-name component))
-              (if (%file-node-p component) "lisp" nil)))
-            dir))))
+           (if (%file-node-p component)
+               (uiop:merge-pathnames*
+                (%coerce-path-string-file
+                 (or
+                  (component-pathname component)
+                  (component-name component)))
+                dir)
+               (uiop:merge-pathnames*
+                (%coerce-path-string-module
+                 (or
+                  (component-pathname component)
+                  (component-name component)))
+                dir)))))
     (flet ((add-prop (name value)
              (push name plist)
              (push value plist)))
@@ -329,7 +343,7 @@
               (uiop:merge-pathnames*
                (%coerce-path-string pathname)
                (uiop:pathname-directory-pathname path)))
-            path))))
+            (uiop:pathname-directory-pathname path)))))
     (flet ((add-prop (name value)
              (push name plist)
              (push value plist)))

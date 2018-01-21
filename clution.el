@@ -2727,6 +2727,10 @@ See `file-notify-add-watch'"
   0)
 "))))))
 
+(defun clution--script-system-template (path)
+  ;;Equivalent to executable
+  (clution--executable-system-template path))
+
 (defun clution--library-system-template (path)
   (let ((name (file-name-base path))
         (dir (file-name-directory path))
@@ -2775,6 +2779,7 @@ See `file-notify-add-watch'"
   :group 'clution)
 
 (defcustom clution-system-template-alist '((:executable . clution--executable-system-template)
+                                           (:script . clution--script-system-template)
                                            (:library . clution--library-system-template))
   "An alist of publish target handlers."
   :type '(alist :key-type symbol :value-type function)

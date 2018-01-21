@@ -125,7 +125,8 @@ Arguments accepted:
                                             :name (cl-getf component-plist :name)
                                             :type (cl-getf component-plist :type)
                                             :path (cl-getf component-plist :pathname)
-                                            :children nil)))
+                                            :children nil
+                                            :depends-on (cl-getf component-plist :depends-on))))
                                      (setf (cl-getf component-node :children)
                                            (cl-mapcar
                                             (lexical-let ((component-node component-node)
@@ -134,23 +135,7 @@ Arguments accepted:
                                                 (translate-component-plist system component-node c)))
                                             (cl-getf component-plist :components)))
                                      component-node)))
-    (let ((system-node
-           (list
-            :system system
-            :parent nil
-            :name (cl-getf system-plist :name)
-            :type :module
-            :depends-on (cl-getf system-plist :depends-on)
-            :path (cl-getf system-plist :pathname)
-            :children nil)))
-      (setf (getf system-node :children)
-            (cl-mapcar
-             (lexical-let ((system-node system-node)
-                           (system system))
-               (lambda (child-plist)
-                 (translate-component-plist system system-node child-plist)))
-             (cl-getf system-plist :components)))
-      system-node)))
+    (translate-component-plist system nil system-plist)))
 
 (defun clution--system-query (system)
   "Perform a system query operation on `system' and returns the result."
@@ -268,6 +253,29 @@ When `delete' is non-nil, delete that system from disk."
       (clution--update-system-query (clution--node.system node))
       (clution--sync-buffers *clution--current-clution*)))))
 
+(defun clution--add-system-dependency (node)
+  (let* ((system (clution--node.system node))
+         (system-path (clution--system.path system))
+         (node-id (clution--node.node-id node))
+         (dependency (read-string "dependency to add: ")))
+
+    (clution--cl-clution-eval
+     `(add-depends-on ',system-path ',node-id ',dependency))
+
+    (clution--update-system-query system)
+    (clution--sync-buffers *clution--current-clution*)))
+
+(defun clution--remove-system-dependency (node dependency)
+  (let* ((system (clution--node.system node))
+         (system-path (clution--system.path system))
+         (node-id (clution--node.node-id node)))
+
+    (clution--cl-clution-eval
+     `(remove-depends-on ',system-path ',node-id ',dependency))
+
+    (clution--update-system-query system)
+    (clution--sync-buffers *clution--current-clution*)))
+
 (defvar *clution--current-clution* nil
   "The currently open clution.")
 
@@ -316,6 +324,10 @@ Returns the window displaying the buffer"
 
 (defun clution--toggle-parent-fold (parent)
   (clution--node.set-folded parent (not (clution--node.folded parent)))
+  (clution--sync-buffers *clution--current-clution*))
+
+(defun clution--toggle-depends-on-fold (parent)
+  (clution--depends-on.set-folded parent (not (clution--depends-on.folded parent)))
   (clution--sync-buffers *clution--current-clution*))
 
 (defun clution--insert-clution-button (clution)
@@ -769,6 +781,105 @@ Returns the window displaying the buffer"
                        (clution--rename-system-item child)))))
     button))
 
+(defun clution--insert-depends-on (node indent)
+  (insert-char ?\s indent)
+  (lexical-let* ((node node)
+                 (depends-on (clution--node.depends-on node))
+                 (fold-map
+                  (make-sparse-keymap))
+                 (fold-button
+                  (insert-button
+                   (if (clution--depends-on.folded node) "▸ " "▾ ")
+                   'face 'clution-clutex-dependencies-face
+                   'help-echo nil
+                   'keymap fold-map))
+                 (map (make-sparse-keymap))
+                 (button
+                  (insert-button
+                   "Dependencies"
+                   'face 'clution-clutex-dependencies-face
+                   'help-echo nil
+                   'keymap map)))
+    (define-key fold-map (kbd "C-m")
+      (lambda ()
+        (interactive)
+        (clution--toggle-depends-on-fold node)))
+    (define-key fold-map (kbd "TAB")
+      (lambda ()
+        (interactive)
+        (clution--toggle-depends-on-fold node)))
+    (define-key fold-map (kbd "<mouse-1>")
+      (lambda ()
+        (interactive)
+        (clution--toggle-depends-on-fold node)))
+    (define-key map (kbd "C-m")
+      (lambda ()
+        (interactive)
+        (clution--toggle-depends-on-fold node)))
+    (define-key map (kbd "TAB")
+      (lambda ()
+        (interactive)
+        (clution--toggle-depends-on-fold node)))
+    (define-key map (kbd "<mouse-1>")
+      (lambda ()
+        (interactive)
+        (clution--toggle-depends-on-fold node)))
+    (define-key map (kbd "A")
+      (lambda ()
+        (interactive)
+        (clution--add-system-dependency node)))
+    (define-key fold-map (kbd "A")
+      (lambda ()
+        (interactive)
+        (clution--add-system-dependency node)))
+
+    (let ((mouse-menu (make-sparse-keymap)))
+      (define-key map (kbd "<mouse-3>")
+        mouse-menu)
+      (define-key fold-map (kbd "<mouse-3>")
+        mouse-menu)
+
+      (define-key-after mouse-menu [add]
+        `(menu-item "Add Dependency..."
+                    ,(lambda ()
+                       (interactive)
+                       (clution--add-system-dependency node)))))
+
+    (unless (clution--depends-on.folded node)
+      (dolist (dependency depends-on)
+        (insert "\n")
+        (insert-char ?\s (+ indent 2))
+        (lexical-let* ((dependency dependency)
+                       (dep-map (make-sparse-keymap))
+                       (dep-button (insert-button
+                                    dependency
+                                    'face 'clution-clutex-dependencies-face
+                                    'help-echo nil
+                                    'keymap dep-map)))
+          (define-key dep-map (kbd "D")
+            (lambda ()
+              (interactive)
+              (clution--remove-system-dependency node dependency)))
+          (define-key dep-map (kbd "<delete>")
+            (lambda ()
+              (interactive)
+              (clution--remove-system-dependency node dependency)))
+          (define-key dep-map (kbd "A")
+            (lambda ()
+              (interactive)
+              (clution--add-system-dependency node)))
+
+          (let ((mouse-map (make-sparse-keymap)))
+            (define-key dep-map (kbd "<mouse-3>")
+              mouse-map)
+
+            (define-key-after mouse-map [remove]
+              `(menu-item "Remove"
+                          ,(lambda ()
+                             (interactive)
+                             (clution--remove-system-dependency node dependency))))))))
+    button))
+
 (defun clution--insert-nodes (nodes indent)
   (dolist (node nodes)
     (insert-char ?\s indent)
@@ -796,6 +907,8 @@ Returns the window displaying the buffer"
       (insert "\n")
       (let ((node (clution--system.query-node system)))
         (unless (clution--node.folded node)
+          (clution--insert-depends-on node 4)
+          (insert "\n")
           (clution--insert-nodes (clution--node.children node) 4))))))
 
 (defun clution--output-buffer (&optional create)
@@ -1441,6 +1554,9 @@ Returns the window displaying the buffer"
 (defun clution--node.children (node)
   (cl-getf node :children))
 
+(defun clution--node.depends-on (node)
+  (cl-getf node :depends-on))
+
 (defun clution--node.node-id (node)
   (let ((res ())
         (node node))
@@ -1457,6 +1573,18 @@ Returns the window displaying the buffer"
 
 (defun clution--node.set-folded (node folded)
   (let* ((node-id (clution--node.node-id node))
+         (clution (clution--node.clution node))
+         (cuo (clution--clution.cuo clution)))
+    (clution--cuo.set-fold-state cuo node-id folded)))
+
+(defun clution--depends-on.folded (node)
+  (let* ((node-id (append (clution--node.node-id node) '("/depends-on/")))
+         (clution (clution--node.clution node))
+         (cuo (clution--clution.cuo clution)))
+    (clution--cuo.get-fold-state cuo node-id)))
+
+(defun clution--depends-on.set-folded (node folded)
+  (let* ((node-id (append (clution--node.node-id node) '("/depends-on/")))
          (clution (clution--node.clution node))
          (cuo (clution--clution.cuo clution)))
     (clution--cuo.set-fold-state cuo node-id folded)))
@@ -2917,6 +3045,11 @@ generated clution files."
 (defface clution-clutex-selected-system-face
   '((t                   (:inherit dired-marked)))
   "*Face used for the selected system in clutex buffer."
+  :group 'clutex :group 'font-lock-highlighting-faces)
+
+(defface clution-clutex-dependencies-face
+  '((t                   (:inherit dired-header)))
+  "*Face used for dependencies in clutex buffer."
   :group 'clutex :group 'font-lock-highlighting-faces)
 
 (defface clution-clutex-dir-face

@@ -26,7 +26,7 @@
 (defun %coerce-name-string (name)
   (etypecase name
     (sexp-symbol-node
-     (symbol-node-name name))
+     (string-downcase (symbol-node-name name)))
     (sexp-string-node
      (string-node-string name))))
 
@@ -434,11 +434,7 @@
     (when-let* ((depends-on (component-depends-on module))
                 (node (efirst* (vchildren depends-on)
                                (lambda (node)
-                                 (typecase node
-                                   (sexp-symbol-node
-                                    (sexp-symbol-match node name))
-                                   (sexp-string-node
-                                    (string= (string-node-string node) name)))))))
+                                 (string= (%coerce-name-string node) name)))))
       (let* ((cell (member node (children depends-on))))
         ;;Delete any white space that follows it
         (loop :while (and (cdr cell) (%whitespace-node-p (cadr cell)))

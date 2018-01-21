@@ -72,6 +72,32 @@
       (write-asd-file asd stream))
     t))
 
+(defun add-depends-on (asd-path component-path dependency-name
+                       &aux
+                         (system-name (first component-path)))
+  (declare (ignore system-name))
+  (when-let* ((asd (read-asd-file asd-path))
+              ;;TODO need to find system by name
+              (system (efirst (asd-file-systems asd))))
+    (system-add-depends-on system (rest component-path) (make-symbol (string-upcase dependency-name)))
+    ;;Spit out the new system file
+    (with-output-to-file (stream asd-path :if-exists :supersede :external-format :utf-8)
+      (write-asd-file asd stream))
+    t))
+
+(defun remove-depends-on (asd-path component-path dependency-name
+                         &aux
+                           (system-name (first component-path)))
+  (declare (ignore system-name))
+  (when-let* ((asd (read-asd-file asd-path))
+              ;;TODO need to find system by name
+              (system (efirst (asd-file-systems asd))))
+    (system-remove-depends-on system (rest component-path) dependency-name)
+    ;;Spit out the new system file
+    (with-output-to-file (stream asd-path :if-exists :supersede :external-format :utf-8)
+      (write-asd-file asd stream))
+    t))
+
 (defun main (&rest args)
   (unless (= (length args) 2)
     (format t "Invalid arguments~%")

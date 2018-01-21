@@ -1,0 +1,6 @@
+ql alexandria :latest
+ql cl-arrows :latest
+ql cl-cont :latest
+github enumerable Zulu-Inuoe/enumerable
+ql parse-float :latest
+github trivial-cltl2 Zulu-Inuoe/trivial-cltl2

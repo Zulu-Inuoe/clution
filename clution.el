@@ -14,6 +14,80 @@
 (require 'filenotify)
 (require 'pp)
 
+(defvar *clution--cl-clution-path*
+  (expand-file-name
+   "cl-clution/cl-clution.lisp"
+   (file-name-directory (file-truename load-file-name)))
+  "Path to the 'cl-clution' script.")
+
+(defvar *clution--cl-clution-proc* nil
+  "A background lisp process to perform operations.")
+(defvar *clution--cl-clution-output* "")
+(defvar *clution--cl-clution-eval-delim* (format "%dcl-clution-eval-deliml%d" (random) (random)))
+(defvar *clution--cl-clution-cont* nil)
+(defvar *clution--cl-clution-result* (cons nil nil))
+
+(defun clution--cl-clution-filter (proc string)
+  (setf *clution--cl-clution-output* (concat *clution--cl-clution-output* string))
+  (when-let ((match-pos (string-match *clution--cl-clution-eval-delim* *clution--cl-clution-output*)))
+    (setf *clution--cl-clution-result*
+          (condition-case err
+              (let ((res (car (read-from-string *clution--cl-clution-output* 0 match-pos))))
+                (if (eq (car res) :SUCCESS)
+                    (cons t (cdr res))
+                  (cons nil (cdr res))))
+            (error
+             (warn "error reading from cl-clution")
+             (cons nil (format "error during read: %s" err)))))
+    (when *clution--cl-clution-cont*
+      (run-at-time 0 nil *clution--cl-clution-cont* (car *clution--cl-clution-result*) (cdr *clution--cl-clution-result*)))
+    (setf *clution--cl-clution-output* (subseq *clution--cl-clution-output* (+ match-pos (length *clution--cl-clution-eval-delim*))))
+    (setf *clution--cl-clution-cont* nil)))
+
+(defun clution--cl-clution-sentinel (proc event)
+  (cl-case (process-status proc)
+    ((exit closed failed)
+     (error "clution--cl-clution died.")
+     (clution--cl-clution-start))))
+
+(defun clution--cl-clution-eval-async (sexpr &optional cont)
+  (setf *clution--cl-clution-cont* cont)
+  (process-send-string
+   *clution--cl-clution-proc*
+   (format "%S\n" sexpr)))
+
+(defun clution--cl-clution-eval (sexpr)
+  (setf *clution--cl-clution-result* nil)
+  (process-send-string
+   *clution--cl-clution-proc*
+   (format "%S\n" sexpr))
+  (while (null *clution--cl-clution-result*)
+    (accept-process-output *clution--cl-clution-proc*))
+  (if (car *clution--cl-clution-result*)
+      (cdr *clution--cl-clution-result*)
+    (error "error during cl-clution-eval: %s" (cdr *clution--cl-clution-result*))))
+
+(defun clution--cl-clution-start ()
+  (clution--cl-clution-stop)
+  (setf *clution--cl-clution-proc*
+        (make-process
+         :name "*clution-cl-clution*"
+         :command (append (clution--spawn-script-command)
+                          (clution--spawn-script-args *clution--cl-clution-path*)
+                          (list *clution--cl-clution-eval-delim*))
+         :filter 'clution--cl-clution-filter
+         :sentinel 'clution--cl-clution-sentinel)))
+
+(defun clution--cl-clution-stop ()
+  (when *clution--cl-clution-cont*
+    (run-at-time 0 nil *clution--cl-clution-cont* nil nil))
+  (setf *clution--cl-clution-output* "")
+  (setf *clution--cl-clution-cont* nil)
+  (when (process-live-p *clution--cl-clution-proc*)
+    (set-process-sentinel *clution--cl-clution-proc* nil)
+    (delete-process *clution--cl-clution-proc*))
+  (setf *clution--cl-clution-proc* nil))
+
 (defun clution--async-proc (&rest args)
   "Run a process asynchronously via `make-process', calling a continuation
 function with the exit code when it completes.
@@ -42,225 +116,45 @@ Arguments accepted:
                 (funcall cont (process-exit-status proc))))
              (t))))))))
 
-(defun clution--make-eval-proc-async (&rest args)
-  (let ((name (or (cl-getf args :name) "*clution-eval-proc*"))
-        (command (append (clution--spawn-repl-command) (clution--spawn-repl-args)))
-        (dir (or (cl-getf args :dir) default-directory))
-        (cont (cl-getf args :cont)))
-    (lexical-let* ((cont cont)
-                   (sentinel-value  (format "%dclution-sentinel%d" (random) (random)))
-                   (output "")
-                   (proc
-                    (let ((default-directory dir))
-                      (make-process
-                       :name name
-                       :command command
-                       :sentinel
-                       (lambda (proc event)
-                         (case (process-status proc)
-                           (exit
-                            (set-process-filter proc nil)
-                            (set-process-sentinel proc nil)
-                            (when cont
-                              (run-at-time 0 nil cont nil)))))
-                       :filter
-                       (lambda (proc string)
-                         (setq output (concat output string))
-                         (when (string-match sentinel-value output)
-                           (set-process-filter proc nil)
-                           (set-process-sentinel proc nil)
-                           (when cont
-                             (run-at-time 0 nil cont proc))))))))
-      (process-send-string
-       proc
-       (format "%S\n"
-               `(cl:progn
-                 (cl:print "")
-                 (cl:finish-output)
-                 (cl:defvar *clution-output* *standard-output*)
-                 (cl:setq cl:*standard-output* (cl:make-broadcast-stream)
-                          cl:*error-output* cl:*standard-output*
-                          cl:*trace-output* cl:*standard-output*
-
-                          cl:*debug-io* (cl:make-two-way-stream (cl:make-string-input-stream "")  cl:*standard-output*)
-                          cl:*query-io* cl:*debug-io*)
-                 (cl:write-string ,sentinel-value *clution-output*)
-                 (cl:finish-output *clution-output*))))
-      proc)))
-
-(defun clution--make-eval-proc (&rest args)
-  (let* ((name (or (cl-getf args :name) "*clution-eval-proc*"))
-         (command (append (clution--spawn-repl-command) (clution--spawn-repl-args)))
-         (dir (or (cl-getf args :dir) default-directory))
-         (sentinel-value  (format "%dclution-sentinel%d" (random) (random)))
-         (output "")
-         (proc
-          (let ((default-directory dir))
-            (make-process
-             :name name
-             :command command
-             :filter
-             (lambda (proc string)
-               (setq output (concat output string)))))))
-    (process-send-string
-     proc
-     (format "%S\n"
-             `(cl:progn
-               (cl:print "")
-               (cl:finish-output)
-               (cl:defvar *clution-output* *standard-output*)
-               (cl:setq cl:*standard-output* (cl:make-broadcast-stream)
-                        cl:*error-output* cl:*standard-output*
-                        cl:*trace-output* cl:*standard-output*
-
-                        cl:*debug-io* (cl:make-two-way-stream (cl:make-string-input-stream "")  cl:*standard-output*)
-                        cl:*query-io* cl:*debug-io*)
-               (cl:write-string ,sentinel-value *clution-output*)
-               (cl:finish-output *clution-output*))))
-    (while (and (process-live-p proc)
-                (not (string-match sentinel-value output)))
-      (accept-process-output proc))
-    (set-process-filter proc nil)
-    proc))
-
-(defun clution--with-normal-io-form (&rest sexprs)
-  `(cl:let ((cl:*standard-output* *clution-output*)
-            (cl:*error-output* cl:*standard-output*)
-            (cl:*trace-output* cl:*standard-output*)
-            (cl:*debug-io* (cl:make-two-way-stream *standard-input*  cl:*standard-output*))
-            (cl:*query-io* cl:*debug-io*))
-           ,@sexprs))
-
-(defun clution--eval-in-lisp-async (sexpr cont)
-  (lexical-let ((sexpr sexpr)
-                (cont cont)
-                (output ""))
-    (clution--make-eval-proc-async
-     :cont
-     (lambda (proc)
-       (cond
-        ((process-live-p proc)
-         ;;Set filter
-         (set-process-filter
-          proc
-          (lambda (proc string)
-            (setf output (concat output string))))
-         ;;Set sentinel
-         (set-process-sentinel
-          proc
-          (lambda (proc event)
-            (case (process-status proc)
-              (exit
-               (condition-case err
-                   (let ((res (car (read-from-string output))))
-                     (when cont
-                       (if (eq (car res) :SUCCESS)
-                           (run-at-time 0 nil cont t (cdr res))
-                         (run-at-time 0 nil cont nil (cdr res)))))
-                 (error
-                  (when cont
-                    (run-at-time 0 nil cont nil nil))))))))
-         (process-send-string
-          proc
-          (format "%S\n"
-                  `(cl:progn
-                    (cl:prin1
-                     (cl:let ((cl:*standard-input* (cl:make-broadcast-stream)))
-                             (cl:handler-case (cl:cons :success ,sexpr)
-                                              (cl:error (err)
-                                                        (cl:cons :fail (cl:princ-to-string err)))))
-                     *clution-output*)
-                    (cl:finish-output *clution-output*)
-                    ,(clution--exit-form 0)))))
-        (t
-         ;;Failed to start process or errored during setup
-         (when cont
-           (run-at-time 0 nil cont nil nil))))))))
-
-(defun clution--eval-in-lisp (sexpr)
-  "Spin up a fresh lisp and evaluate `sexpr' in it.
-Synchronously waits for evaluation to complete, and returns the result as an elisp sexpr."
-  (lexical-let* ((proc nil)
-                 (output ""))
-    (setf proc (clution--make-eval-proc))
-    (unless (process-live-p proc)
-      (error "clution: error preparing eval process"))
-    (unwind-protect
-        (progn
-          (set-process-filter proc
-                              (lambda (proc string)
-                                (setf output (concat output string))))
-          (process-send-string
-           proc
-           (format "%S\n"
-                   `(cl:progn
-                     (cl:prin1
-                      (cl:let ((cl:*standard-input* (cl:make-broadcast-stream)))
-                              (cl:handler-case (cl:cons :success ,sexpr)
-                                               (cl:error (err)
-                                                         (cl:cons :fail (cl:princ-to-string err)))))
-                      *clution-output*)
-                     (cl:finish-output *clution-output*)
-                     ,(clution--exit-form 0))))
-          (while (process-live-p proc)
-            (accept-process-output proc))
-          (let ((res (car (read-from-string output))))
-            (unless (eq (car res) :SUCCESS)
-              (error "clution: error during eval: %s" (cdr res)))
-            (cdr res)))
-      (delete-process proc))))
-
-(defun clution--systems-query (systems)
-  "Performs a system query operation on each system in `systems' and returns a list of the results."
-  (let ((names-paths-alist
-         (mapcar
-          (lambda (system)
-            (cons
-             (clution--system.name system)
-             (clution--system.path system)))
-          systems)))
-    (let ((query-results
-           (clution--eval-in-lisp
-            `(cl:labels ((translate-component (component type)
-                                              (cl:list
-                                               :name (asdf:component-name component)
-                                               :path (cl:namestring (asdf:component-pathname component))
-                                               :type type))
-                         (recurse (component)
-                                  (cl:etypecase component
-                                                (asdf:parent-component
-                                                 (cl:cons
-                                                  (translate-component component :parent)
-                                                  (cl:mapcar #'recurse (asdf:component-children component))))
-                                                (asdf:child-component
-                                                 (cons (translate-component component :child) nil)))))
-                        (cl:loop
-                         :for (name . path) :in ',names-paths-alist
-                         :do (asdf:load-asd (cl:parse-namestring path))
-                         :collect (recurse (asdf:find-system name)))))))
-      (cl-mapcar
-       (lambda (query-result system)
-         (cl-labels ((translate-node (node parent system)
-                                     (let* ((data (car node))
-                                            (children (cdr node))
-                                            (translated
-                                             (list
-                                              :system system
-                                              :parent parent
-                                              :name (cl-getf data :NAME)
-                                              :path (cl-getf data :PATH)
-                                              :type (cl-getf data :TYPE)
-                                              :children nil)))
-                                       (setf (cl-getf translated :children)
-                                             (mapcar (lambda (c) (translate-node c parent system)) children))
-                                       translated)))
-           (translate-node query-result nil system)))
-       query-results
-       systems))))
+(defun clution--translate-system-plist (system system-plist)
+  (cl-labels ((translate-component-plist (system parent component-plist)
+                                   (let* ((component-node
+                                           (list
+                                            :system system
+                                            :parent parent
+                                            :name (cl-getf component-plist :NAME)
+                                            :type (intern (downcase (symbol-name (cl-getf component-plist :TYPE))))
+                                            :path (cl-getf component-plist :PATHNAME)
+                                            :children nil)))
+                                     (setf (cl-getf component-node :children)
+                                           (cl-mapcar
+                                            (lexical-let ((component-node component-node)
+                                                          (system system))
+                                              (lambda (c)
+                                                (translate-component-plist system component-node c)))
+                                            (cl-getf component-plist :COMPONENTS)))
+                                     component-node)))
+    (let ((system-node
+           (list
+            :system system
+            :parent nil
+            :name (cl-getf system-plist :NAME)
+            :type :module
+            :depends-on (cl-getf system-plist :DEPENDS-ON)
+            :path (cl-getf system-plist :PATHNAME)
+            :children nil)))
+      (setf (getf system-node :children)
+            (cl-mapcar
+             (lexical-let ((system-node system-node)
+                           (system system))
+               (lambda (child-plist)
+                 (translate-component-plist system system-node child-plist)))
+             (cl-getf system-plist :COMPONENTS)))
+      system-node)))
 
 (defun clution--system-query (system)
   "Perform a system query operation on `system' and returns the result."
-  (car (clution--systems-query (list system))))
+  (clution--translate-system-plist system (car (clution--cl-clution-eval `(asd-plists ,(clution--system.path system))))))
 
 (defun clution--add-system (clution path type)
   "Adds the system at `path' to the given `clution'"
@@ -287,18 +181,46 @@ When `delete' is non-nil, delete that system from disk."
     (clution--clution.remove-system clution system)
     (clution--save-clution clution)))
 
-(defun clution--add-system-item (node)
-  )
+(defun clution--add-system-item (node))
 
-(defun clution--create-system-item (node)
-  )
+(defun clution--create-system-item (node))
 
 (defun clution--rename-system-item (node)
-  )
+  (let ((new-name
+         (read-string (format "'%s' rename to: " (clution--node.name node)))))
+    (clution--cl-clution-eval `(rename-component ,(clution--system.path (clution--node.system node)) ',(clution--node.node-id node) ,new-name))
+    (cl-case (clution--node.type node)
+      (:file
+       (let* ((old-path (clution--node.path node))
+              (new-path
+               (expand-file-name
+                (concat new-name ".lisp")
+                (file-name-directory old-path))))
+         (rename-file old-path new-path)))
+      (:module
+       (let* ((old-path (clution--node.path node))
+              (new-path
+               (file-name-as-directory
+                (expand-file-name
+                 new-name
+                 (file-name-directory old-path)))))
+         (rename-file old-path new-path))))
+    (clution--update-system-query (clution--node.system node))
+    (clution--sync-buffers *clution--current-clution*)))
 
-(defun clution--remove-system-item (node)
-  )
-
+(defun clution--remove-system-item (node &optional delete)
+  (cond
+   ((not delete)
+    (when (y-or-n-p (format "confirm: Remove component '%s'" (clution--node.name node)))
+      (clution--cl-clution-eval `(remove-component ,(clution--system.path (clution--node.system node)) ',(clution--node.node-id node)))
+      (clution--update-system-query (clution--node.system node))
+      (clution--sync-buffers *clution--current-clution*)))
+   (t
+    (when (y-or-n-p (format "confirm: Permanently delete component '%s'" (clution--node.name node)))
+      (clution--cl-clution-eval `(remove-component ,(clution--system.path (clution--node.system node)) ',(clution--node.node-id node)))
+      (delete-file (clution--node.path node))
+      (clution--update-system-query (clution--node.system node))
+      (clution--sync-buffers *clution--current-clution*)))))
 
 (defvar *clution--current-clution* nil
   "The currently open clution.")
@@ -634,10 +556,10 @@ Returns the window displaying the buffer"
   (dolist (node nodes)
     (insert-char ?\s indent)
     (cl-case  (clution--node.type node)
-      (:CHILD
+      (:file
        (clution--insert-child-button node)
        (insert "\n"))
-      (:PARENT
+      (:module
        (clution--insert-parent-button node)
        (insert "\n")
        (unless (clution--node.folded node)
@@ -809,7 +731,6 @@ Returns the window displaying the buffer"
   (clution--set-window-width window clution-clutex-width))
 
 ;;;; Clution/System data structures, and loaders
-
 (defun clution--update-system-query (system)
   (when-let ((query (ignore-errors (clution--system-query system))))
     (setf (cl-getf system :query-node) query)))
@@ -848,8 +769,7 @@ Returns the window displaying the buffer"
           :toplevel (cl-getf data :toplevel)
           :type (cl-getf data :type)
           :query-node nil)))
-    (unless clution
-      (setf (cl-getf res :query-node) (clution--system-query res)))
+    (setf (cl-getf res :query-node) (clution--system-query res))
     res))
 
 (defun clution--insert-cuo (cuo indent)
@@ -978,17 +898,10 @@ Returns the window displaying the buffer"
             (file-name-as-directory qlfile-libs-dir)))))
 
     (setf (cl-getf res :systems)
-          (mapcar
+          (cl-mapcar
            (lambda (sys-data)
              (clution--make-system sys-data res))
            (cl-getf data :systems)))
-
-    ;;Perform system queries
-    (cl-mapc
-     (lambda (system query)
-       (setf (cl-getf system :query-node) query))
-     (clution--clution.systems res)
-     (clution--systems-query (clution--clution.systems res)))
 
     (if (file-exists-p (clution--clution.cuo-path res))
         (setf (cl-getf res :cuo) (clution--parse-cuo-file (clution--clution.cuo-path res)))
@@ -1823,7 +1736,7 @@ Initializes ASDF and loads the selected system."
              (system-out-dir (file-name-as-directory
                               (expand-file-name system-name out-systems-dir))))
         (clution--append-output
-         "\n\tBundling '" system-name "'")
+         "\n\tBundling '" system-name "'\n")
         (cl-labels ((recurse (node)
                              (let* ((path (clution--node.path node))
                                     (rel-path (file-relative-name path system-dir))
@@ -1835,30 +1748,32 @@ Initializes ASDF and loads the selected system."
                                 (t
                                  (unless (file-exists-p (file-name-directory new-path))
                                    (make-directory (file-name-directory new-path) t))
+                                 (clution--append-output
+                                  "\t\tCopying '" path "'\n"
+                                  "\t\t\tto '" new-path "'\n")
                                  (copy-file path new-path nil t nil nil)))
                                (cl-mapc #'recurse (clution--node.children node)))
                              (clution--node.path node)))
-          (recurse (clution--system.query-node system))
-          ;;Copy the asd itself
-          (copy-file system-path
-                     (expand-file-name (file-name-nondirectory system-path) system-out-dir)
-                     nil t nil nil))))
+          (recurse (clution--system.query-node system)))))
     (clution--append-output
      "\n\nFinished bundling clution systems\n\n")
 
     (clution--append-output
-     "Generating script at '" out-script-path "'...\n")
+     "Generating script at '" out-script-path "'\n")
     ;;Create the runner script
-    (write-region
-     (pp-to-string
-      `(progn
-         (eval-when (:compile-toplevel :load-toplevel :execute)
-           (handler-case
-               (require 'asdf)
-             (error (e)
-                    (format *error-output* "Error requiring ASDF:~%~T~A" e)
-                    ,(clution--exit-form 1))))
-         (eval-when (:compile-toplevel :load-toplevel :execute)
+    (with-temp-buffer
+      (insert
+       (pp-to-string
+        `(eval-when (:compile-toplevel :load-toplevel :execute)
+           (handler-bind ((error (lambda (e)
+                                   (format *error-output* "Error requiring ASDF:~%~T~A" e))))
+             (require 'asdf))
+           (handler-bind ((error (lambda (e)
+                                   (format *error-output* "Error requiring UIOP:~%~T~A" e))))
+             (require 'uiop)))))
+      (insert
+       (pp-to-string
+        `(eval-when (:compile-toplevel :load-toplevel :execute)
            (handler-case
                (progn
                  ,@(when (clution--clution.qlfile-p clution)
@@ -1888,24 +1803,18 @@ Initializes ASDF and loads the selected system."
                    (asdf:load-system ,system-name :verbose nil)))
              (error (e)
                     (format *error-output* "Error loading systems:~%~T~A" e)
-                    ,(clution--exit-form 1))))))
-     nil
-     out-script-path
-     t)
-
-    (write-region
-     (pp-to-string
-      `(handler-case
-           (let ((ret-code (apply (function ,(intern toplevel)) ,(clution--args-list-form))))
-             (if (integerp ret-code)
-                 ,(clution--exit-form 'ret-code)
-               ,(clution--exit-form 0)))
-         (error (e)
-                (format *error-output* "Uncaught error:~%~T~A" e)
-                ,(clution--exit-form 1))))
-     nil
-     out-script-path
-     t)
+                    ,(clution--exit-form -1))))))
+      (insert
+       (pp-to-string
+        `(handler-case
+             (let ((ret-code (apply (function ,(intern toplevel)) ,(clution--args-list-form))))
+               (if (integerp ret-code)
+                   ,(clution--exit-form 'ret-code)
+                 ,(clution--exit-form 0)))
+           (error (e)
+                  (format *error-output* "Uncaught error:~%~T~A" e)
+                  ,(clution--exit-form -1)))))
+      (write-region nil nil out-script-path))
 
     (clution--append-output
      "Finished generating script\n\n")
@@ -3104,6 +3013,7 @@ generated clution files."
     (let ((clution-intrusive-ui (not clution-intrusive-ui)))
       (clution-close)))
 
+  (clution--cl-clution-start)
   (let* ((path (expand-file-name path))
          (clution (clution--parse-file path)))
     (let ((clu-dir (clution--clution.clu-dir clution)))
@@ -3153,6 +3063,8 @@ generated clution files."
 (defun clution-close ()
   "Close the currently open clution, ending a repl if it is active."
   (interactive)
+  (clution--cl-clution-stop)
+
   (when *clution--current-clution*
     (when *clution--repl-active*
       (clution-end-repl))

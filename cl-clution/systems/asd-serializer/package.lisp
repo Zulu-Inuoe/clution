@@ -23,6 +23,8 @@
    #:asd-file-add-file-component
    #:asd-file-add-module-component
    #:asd-file-rename-component
+   #:asd-file-move-component-up
+   #:asd-file-move-component-down
    #:asd-file-remove-component
    #:asd-file-add-depends-on
    #:asd-file-remove-depends-on))

@@ -214,6 +214,16 @@ When `delete' is non-nil, delete that system from disk."
     (clution--update-system-query system)
     (clution--sync-buffers *clution--current-clution*)))
 
+(defun clution--move-system-item-up (node)
+  (clution--cl-clution-eval `(move-component-up ',(clution--system.path (clution--node.system node)) ',(clution--node.node-id node)))
+  (clution--update-system-query (clution--node.system node))
+  (clution--sync-buffers *clution--current-clution*))
+
+(defun clution--move-system-item-down (node)
+  (clution--cl-clution-eval `(move-component-down ',(clution--system.path (clution--node.system node)) ',(clution--node.node-id node)))
+  (clution--update-system-query (clution--node.system node))
+  (clution--sync-buffers *clution--current-clution*))
+
 (defun clution--rename-system-item (node)
   (let ((new-name
          (read-string (format "'%s' rename to: " (clution--node.name node)))))
@@ -664,6 +674,22 @@ Returns the window displaying the buffer"
       (lambda ()
         (interactive)
         (clution--create-system-module parent)))
+    (define-key fold-map (kbd "<C-up>")
+      (lambda ()
+        (interactive)
+        (clution--move-system-item-up parent)))
+    (define-key map (kbd "<C-up>")
+      (lambda ()
+        (interactive)
+        (clution--move-system-item-up parent)))
+    (define-key fold-map (kbd "<C-down>")
+      (lambda ()
+        (interactive)
+        (clution--move-system-item-down parent)))
+    (define-key map (kbd "<C-down>")
+      (lambda ()
+        (interactive)
+        (clution--move-system-item-down parent)))
     (define-key fold-map (kbd "R")
       (lambda ()
         (interactive)
@@ -699,6 +725,21 @@ Returns the window displaying the buffer"
                       ,(lambda ()
                          (interactive)
                          (clution--create-system-module parent)))))
+
+      (define-key-after mouse-menu [separator-move-up]
+        '(menu-item "--"))
+
+      (define-key-after mouse-menu [move-up]
+        `(menu-item "Move Up"
+                    ,(lambda ()
+                       (interactive)
+                       (clution--move-system-item-up parent))))
+
+      (define-key-after mouse-menu [move-down]
+        `(menu-item "Move Down"
+                    ,(lambda ()
+                       (interactive)
+                       (clution--move-system-item-down parent))))
 
       (define-key-after mouse-menu [separator-delete]
         '(menu-item "--"))
@@ -751,6 +792,14 @@ Returns the window displaying the buffer"
       (lambda ()
         (interactive)
         (clution--create-system-module (clution--node.parent child))))
+    (define-key map (kbd "<C-up>")
+      (lambda ()
+        (interactive)
+        (clution--move-system-item-up child)))
+    (define-key map (kbd "<C-down>")
+      (lambda ()
+        (interactive)
+        (clution--move-system-item-down child)))
     (define-key map (kbd "R")
       (lambda ()
         (interactive)
@@ -765,6 +814,20 @@ Returns the window displaying the buffer"
                     ,(lambda ()
                        (interactive)
                        (clution--clutex-open-file (clution--node.path child)))))
+      (define-key-after mouse-menu [separator-move-up]
+        '(menu-item "--"))
+
+      (define-key-after mouse-menu [move-up]
+        `(menu-item "Move Up"
+                    ,(lambda ()
+                       (interactive)
+                       (clution--move-system-item-up child))))
+
+      (define-key-after mouse-menu [move-down]
+        `(menu-item "Move Down"
+                    ,(lambda ()
+                       (interactive)
+                       (clution--move-system-item-down child))))
 
       (define-key-after mouse-menu [separator-delete]
         '(menu-item "--"))

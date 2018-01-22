@@ -71,8 +71,8 @@
        (sexp-symbol-match (sexp-list-nth component 0) "MODULE" :keyword)))
 
 (defun %node-indention-level (node
-                             &aux
-                               (parent (sexp-node-parent node)))
+                              &aux
+                                (parent (sexp-node-parent node)))
   (cond
     ((null parent)
      0)
@@ -167,11 +167,11 @@
      :children (nreverse nodes))))
 
 (defun %create-module-component (name &key parent pathname (serial nil serial-sup-p)
-                                &aux
-                                  (indent (if parent
-                                              (+ (%node-indention-level parent)
-                                                 (if (%system-node-p parent) 3 2))
-                                              0)))
+                                 &aux
+                                   (indent (if parent
+                                               (+ (%node-indention-level parent)
+                                                  (if (%system-node-p parent) 3 2))
+                                               0)))
   (let ((nodes ()))
     (push (make-instance 'sexp-symbol-node :name "MODULE" :package :keyword) nodes)
     (push (make-instance 'sexp-whitespace-node :text " ") nodes)
@@ -382,7 +382,7 @@
                                             (lambda (child)
                                               (string= (string-node-string (component-name child))
                                                        (current path))))))
-                   (recurse child path)))
+                  (recurse child path)))
                (t
                 node))))
     (recurse system (get-enumerator component-path))))
@@ -520,18 +520,18 @@
   (let ((scores
           (mapcar (lambda (cell) (cons (car cell) 0)) *%eol-sequences*)))
     (labels ((node-eol-scores (node)
-             (cond
-               ((%opaque-node-p node)
-                (let ((text (opaque-node-text node)))
-                  (when-let ((style (car
-                                     (rassoc-if
-                                      (lambda (seq)
-                                        (ends-with-subseq seq text))
-                                      *%eol-sequences*))))
-                    (incf (cdr (assoc style scores))))))
-               ((%parent-node-p node)
-                (dolist (child (children node))
-                  (node-eol-scores child))))))
+               (cond
+                 ((%opaque-node-p node)
+                  (let ((text (opaque-node-text node)))
+                    (when-let ((style (car
+                                       (rassoc-if
+                                        (lambda (seq)
+                                          (ends-with-subseq seq text))
+                                        *%eol-sequences*))))
+                      (incf (cdr (assoc style scores))))))
+                 ((%parent-node-p node)
+                  (dolist (child (children node))
+                    (node-eol-scores child))))))
       (dolist (node nodes)
         (node-eol-scores node)))
     (setf scores (stable-sort scores #'> :key #'cdr))
@@ -574,8 +574,8 @@
       (system-add-file-component system (cdr component-path) component-name))))
 
 (defun asd-file-add-module-component (asd-file component-path component-name
-                             &aux
-                               (system-name (first component-path)))
+                                      &aux
+                                        (system-name (first component-path)))
   (let ((system (efirst* (asd-file-systems asd-file)
                          (lambda (system)
                            (string= (%coerce-name-string (system-name system)) system-name)))))
@@ -586,8 +586,8 @@
       (system-add-module-component system (cdr component-path) component-name))))
 
 (defun asd-file-rename-component (asd-file component-path new-name
-                         &aux
-                           (system-name (first component-path)))
+                                  &aux
+                                    (system-name (first component-path)))
   (let ((system (efirst* (asd-file-systems asd-file)
                          (lambda (system)
                            (string= (%coerce-name-string (system-name system)) system-name)))))
@@ -597,9 +597,33 @@
     (let ((*%eol-sequence* (cdr (assoc (asd-file-eol-style asd-file) *%eol-sequences*))))
       (system-rename-component system (rest component-path) new-name))))
 
+(defun asd-file-move-component-up (asd-file component-path
+                                   &aux
+                                     (system-name (first component-path)))
+  (let ((system (efirst* (asd-file-systems asd-file)
+                         (lambda (system)
+                           (string= (%coerce-name-string (system-name system)) system-name)))))
+    (unless system
+      (error "system does not exist: '~A'" system-name))
+
+    (let ((*%eol-sequence* (cdr (assoc (asd-file-eol-style asd-file) *%eol-sequences*))))
+      (system-move-component-up system (rest component-path)))))
+
+(defun asd-file-move-component-down (asd-file component-path
+                                     &aux
+                                       (system-name (first component-path)))
+  (let ((system (efirst* (asd-file-systems asd-file)
+                         (lambda (system)
+                           (string= (%coerce-name-string (system-name system)) system-name)))))
+    (unless system
+      (error "system does not exist: '~A'" system-name))
+
+    (let ((*%eol-sequence* (cdr (assoc (asd-file-eol-style asd-file) *%eol-sequences*))))
+      (system-move-component-down system (rest component-path)))))
+
 (defun asd-file-remove-component (asd-file component-path
-                         &aux
-                           (system-name (first component-path)))
+                                  &aux
+                                    (system-name (first component-path)))
   (let ((system (efirst* (asd-file-systems asd-file)
                          (lambda (system)
                            (string= (%coerce-name-string (system-name system)) system-name)))))
@@ -610,8 +634,8 @@
       (system-remove-component system (rest component-path)))))
 
 (defun asd-file-add-depends-on (asd-file component-path dependency-name
-                       &aux
-                         (system-name (first component-path)))
+                                &aux
+                                  (system-name (first component-path)))
   (let ((system (efirst* (asd-file-systems asd-file)
                          (lambda (system)
                            (string= (%coerce-name-string (system-name system)) system-name)))))
@@ -622,8 +646,8 @@
       (system-add-depends-on system (rest component-path) dependency-name))))
 
 (defun asd-file-remove-depends-on (asd-file component-path dependency-name
-                          &aux
-                            (system-name (first component-path)))
+                                   &aux
+                                     (system-name (first component-path)))
   (let ((system (efirst* (asd-file-systems asd-file)
                          (lambda (system)
                            (string= (%coerce-name-string (system-name system)) system-name)))))

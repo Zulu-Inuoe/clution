@@ -42,6 +42,22 @@
       (write-asd-file asd stream))
     t))
 
+(defun move-component-up (asd-path component-path)
+  (when-let* ((asd (read-asd-file asd-path)))
+    (asd-file-move-component-up asd component-path)
+    ;;Spit out the new system file
+    (with-output-to-file (stream asd-path :if-exists :supersede :external-format :utf-8)
+      (write-asd-file asd stream))
+    t))
+
+(defun move-component-down (asd-path component-path)
+  (when-let* ((asd (read-asd-file asd-path)))
+    (asd-file-move-component-down asd component-path)
+    ;;Spit out the new system file
+    (with-output-to-file (stream asd-path :if-exists :supersede :external-format :utf-8)
+      (write-asd-file asd stream))
+    t))
+
 (defun remove-component (asd-path component-path)
   (when-let* ((asd (read-asd-file asd-path)))
     (asd-file-remove-component asd component-path)

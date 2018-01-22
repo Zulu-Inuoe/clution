@@ -155,8 +155,17 @@
   (with-output-to-string (res)
     (loop
       :for c := (read-char stream nil nil)
-      :while (and c (not (char= c #\Newline)))
-      :do (write-char c res))))
+      :while c
+      :do
+         (cond
+           ((and (char= c #\Return) ;Windows
+                 (eql (peek-char nil stream nil nil) #\Newline))
+            (return))
+           ((or (char= c #\Newline) ; Unix
+                (char= c #\Return)) ; Old Mac
+            (return))
+           (t
+            (write-char c res))))))
 
 (defun %read-block-comment (stream)
   (with-output-to-string (res)
@@ -203,7 +212,7 @@
 (defenumerable %lex-sexp-file (path)
   "Lex the file at `path' and return an `enumerable' sequence of lexemes"
   (loop
-    :with file-string := (%slurp-file path)
+    :with file-string := (read-file-into-string path :external-format :utf-8)
     :with stream := (make-string-input-stream file-string)
     :for position := (file-position stream)
     :for c := (read-char stream nil nil)

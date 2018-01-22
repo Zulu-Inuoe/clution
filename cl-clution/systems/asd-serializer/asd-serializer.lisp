@@ -10,6 +10,8 @@
 
 (in-package #:asd-serializer)
 
+(defvar *%eol-sequence* '(#\Newline))
+
 (defun %coerce-component-path (path)
   (etypecase path
     (null nil)
@@ -40,7 +42,7 @@
      ;;TODO
      )))
 
-(defun %coerce-path-string-file (path &optional type)
+(defun %coerce-path-string-file (path)
   (etypecase path
     (sexp-symbol-node
      (make-pathname :name (string-downcase (symbol-node-name path)) :type "lisp"))
@@ -49,7 +51,7 @@
     ;;TODO need pathname handling
     ))
 
-(defun %coerce-path-string-module (path &optional type)
+(defun %coerce-path-string-module (path)
   (etypecase path
     (sexp-symbol-node
      (make-pathname :directory (list :relative (string-downcase (symbol-node-name path)))))
@@ -88,11 +90,15 @@
   (let ((prefix-whitespace
           (with-output-to-string (res)
             (unless skip-newline-p
-              (format res "~%"))
+              (do-enumerable (c *%eol-sequence*)
+                (format res "~C" c)))
             (format res "~A" (make-string indent :initial-element #\Space)))))
     (make-instance 'sexp-whitespace-node
                    :parent parent
                    :text prefix-whitespace)))
+
+(defun %parent-node-p (node)
+  (typep node 'sexp-parent-node))
 
 (defun %list-node-p (node)
   (typep node 'sexp-list-node))
@@ -117,7 +123,11 @@
 
 (defun %opaque-node-ends-with-newline (node)
   (and (%opaque-node-p node)
-       (ends-with #\Newline (opaque-node-text node))))
+       (let ((text (opaque-node-text node)))
+         (or
+          (ends-with-subseq '(#\Return #\Newline) text)
+          (ends-with #\Newline text)
+          (ends-with #\Return text)))))
 
 (defun %append-to-list-node (list-node new-node
                              &aux
@@ -341,7 +351,7 @@
            (or
             (when-let ((pathname (system-pathname system)))
               (uiop:merge-pathnames*
-               (%coerce-path-string pathname)
+               (%coerce-path-string-file pathname)
                (uiop:pathname-directory-pathname path)))
             (uiop:pathname-directory-pathname path)))))
     (flet ((add-prop (name value)
@@ -493,12 +503,48 @@
     :initarg :path
     :initform (error "asd-file: must supply path")
     :reader asd-file-path)
+   (eol-style
+    :type (member :windows :unix :old-mac)
+    :reader asd-file-eol-style)
    (nodes
     :type list
     :accessor asd-file-nodes)))
 
+(defvar *%eol-sequences*
+  (list
+   (cons :windows '(#\Return #\Newline))
+   (cons :unix '(#\Newline))
+   (cons :old-mac '(#\Return))))
+
+(defun %guess-eol-style (nodes &optional (default :unix))
+  (let ((scores
+          (mapcar (lambda (cell) (cons (car cell) 0)) *%eol-sequences*)))
+    (labels ((node-eol-scores (node)
+             (cond
+               ((%opaque-node-p node)
+                (let ((text (opaque-node-text node)))
+                  (when-let ((style (car
+                                     (rassoc-if
+                                      (lambda (seq)
+                                        (ends-with-subseq seq text))
+                                      *%eol-sequences*))))
+                    (incf (cdr (assoc style scores))))))
+               ((%parent-node-p node)
+                (dolist (child (children node))
+                  (node-eol-scores child))))))
+      (dolist (node nodes)
+        (node-eol-scores node)))
+    (setf scores (stable-sort scores #'> :key #'cdr))
+    (cond
+      ((every (lambda (cell) (zerop (cdr cell))) scores)
+       ;;All zero
+       default)
+      (t ;;Possibly mixed, but return most popular
+       (caar scores)))))
+
 (defmethod initialize-instance :after ((obj asd-file) &key)
-  (setf (slot-value obj 'nodes) (to-list (%parse-sexp-file (asd-file-path obj)))))
+  (setf (slot-value obj 'nodes) (to-list (%parse-sexp-file (asd-file-path obj)))
+        (slot-value obj 'eol-style) (%guess-eol-style (asd-file-nodes obj) :unix)))
 
 (defun read-asd-file (path)
   (make-instance 'asd-file :path path))
@@ -509,3 +555,80 @@
 
 (defun asd-file-systems (asd-file)
   (where (asd-file-nodes asd-file) #'%system-node-p))
+
+(defun asd-file-system-plists (asd-file)
+  (-> (asd-file-systems asd-file)
+      (select (lambda (system) (system-plist system (asd-file-path asd-file))))
+      (to-list)))
+
+(defun asd-file-add-file-component (asd-file component-path component-name
+                                    &aux
+                                      (system-name (first component-path)))
+  (let ((system (efirst* (asd-file-systems asd-file)
+                         (lambda (system)
+                           (string= (%coerce-name-string (system-name system)) system-name)))))
+    (unless system
+      (error "system does not exist: '~A'" system-name))
+
+    (let ((*%eol-sequence* (cdr (assoc (asd-file-eol-style asd-file) *%eol-sequences*))))
+      (system-add-file-component system (cdr component-path) component-name))))
+
+(defun asd-file-add-module-component (asd-file component-path component-name
+                             &aux
+                               (system-name (first component-path)))
+  (let ((system (efirst* (asd-file-systems asd-file)
+                         (lambda (system)
+                           (string= (%coerce-name-string (system-name system)) system-name)))))
+    (unless system
+      (error "system does not exist: '~A'" system-name))
+
+    (let ((*%eol-sequence* (cdr (assoc (asd-file-eol-style asd-file) *%eol-sequences*))))
+      (system-add-module-component system (cdr component-path) component-name))))
+
+(defun asd-file-rename-component (asd-file component-path new-name
+                         &aux
+                           (system-name (first component-path)))
+  (let ((system (efirst* (asd-file-systems asd-file)
+                         (lambda (system)
+                           (string= (%coerce-name-string (system-name system)) system-name)))))
+    (unless system
+      (error "system does not exist: '~A'" system-name))
+
+    (let ((*%eol-sequence* (cdr (assoc (asd-file-eol-style asd-file) *%eol-sequences*))))
+      (system-rename-component system (rest component-path) new-name))))
+
+(defun asd-file-remove-component (asd-file component-path
+                         &aux
+                           (system-name (first component-path)))
+  (let ((system (efirst* (asd-file-systems asd-file)
+                         (lambda (system)
+                           (string= (%coerce-name-string (system-name system)) system-name)))))
+    (unless system
+      (error "system does not exist: '~A'" system-name))
+
+    (let ((*%eol-sequence* (cdr (assoc (asd-file-eol-style asd-file) *%eol-sequences*))))
+      (system-remove-component system (rest component-path)))))
+
+(defun asd-file-add-depends-on (asd-file component-path dependency-name
+                       &aux
+                         (system-name (first component-path)))
+  (let ((system (efirst* (asd-file-systems asd-file)
+                         (lambda (system)
+                           (string= (%coerce-name-string (system-name system)) system-name)))))
+    (unless system
+      (error "system does not exist: '~A'" system-name))
+
+    (let ((*%eol-sequence* (cdr (assoc (asd-file-eol-style asd-file) *%eol-sequences*))))
+      (system-add-depends-on system (rest component-path) dependency-name))))
+
+(defun asd-file-remove-depends-on (asd-file component-path dependency-name
+                          &aux
+                            (system-name (first component-path)))
+  (let ((system (efirst* (asd-file-systems asd-file)
+                         (lambda (system)
+                           (string= (%coerce-name-string (system-name system)) system-name)))))
+    (unless system
+      (error "system does not exist: '~A'" system-name))
+
+    (let ((*%eol-sequence* (cdr (assoc (asd-file-eol-style asd-file) *%eol-sequences*))))
+      (system-remove-depends-on system (rest component-path) dependency-name))))

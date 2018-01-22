@@ -10,16 +10,6 @@
 
 (in-package #:asd-serializer)
 
-(defun %slurp-file (path &optional (external-format :utf-8))
-  "Slurps the file at `path' into a string and returns it."
-  (with-output-to-string (str)
-    (with-open-file (stream path :direction :input :external-format external-format)
-      (loop
-        :for line := (read-line stream nil nil)
-        :while line
-        :do
-           (write-line line str)))))
-
 (defun %whitespacep (char)
   "Determine if `char' is a whitespace character"
   (check-type char character)

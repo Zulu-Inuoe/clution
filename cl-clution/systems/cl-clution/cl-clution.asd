@@ -11,4 +11,5 @@
   :depends-on
   (#:asd-serializer
    #:alexandria
-   #:enumerable))
+   #:enumerable
+   #:cl-arrows))

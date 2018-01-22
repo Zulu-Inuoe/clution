@@ -19,31 +19,10 @@
    #:read-asd-file
    #:write-asd-file
 
-   #:asd-file-systems
-
-   ;;; System
-   #:system-name
-   #:system-long-name
-   #:system-version
-   #:system-description
-   #:system-long-description
-   #:system-author
-   #:system-license
-   #:system-pathname
-   #:system-serial
-   #:system-components
-   #:system-depends-on
-
-   #:system-plist
-
-   ;; component CRUD
-   #:system-add-file-component
-   #:system-add-module-component
-   #:system-rename-component
-   #:system-move-component-up
-   #:system-move-component-down
-   #:system-remove-component
-
-   ;; system depends-on CRUD
-   #:system-add-depends-on
-   #:system-remove-depends-on))
+   #:asd-file-system-plists
+   #:asd-file-add-file-component
+   #:asd-file-add-module-component
+   #:asd-file-rename-component
+   #:asd-file-remove-component
+   #:asd-file-add-depends-on
+   #:asd-file-remove-depends-on))

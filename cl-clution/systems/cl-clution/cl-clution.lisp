@@ -16,83 +16,51 @@
 (defun asd-plists (asd-path)
   "Gets the plist of the first system found in `asd-path'"
   (when-let* ((asd (read-asd-file asd-path)))
-    (-> (asd-file-systems asd)
-        (select (lambda (s) (system-plist s asd-path)))
-        (to-list))))
+    (asd-file-system-plists asd)))
 
-(defun add-file-component (asd-path component-path component-name
-                           &aux
-                           (system-name (first component-path)))
-  (declare (ignore system-name))
-  (when-let* ((asd (read-asd-file asd-path))
-              ;;TODO need to find system by name
-              (system (efirst (asd-file-systems asd))))
-    (system-add-file-component system (cdr component-path) component-name)
+(defun add-file-component (asd-path component-path component-name)
+  (when-let* ((asd (read-asd-file asd-path)))
+    (asd-file-add-file-component asd component-path component-name)
     ;;Spit out the new system file
     (with-output-to-file (stream asd-path :if-exists :supersede :external-format :utf-8)
       (write-asd-file asd stream))
     t))
 
-(defun add-module-component (asd-path component-path component-name
-                             &aux
-                               (system-name (first component-path)))
-  (declare (ignore system-name))
-  (when-let* ((asd (read-asd-file asd-path))
-              ;;TODO need to find system by name
-              (system (efirst (asd-file-systems asd))))
-    (system-add-module-component system (cdr component-path) component-name)
+(defun add-module-component (asd-path component-path component-name)
+  (when-let* ((asd (read-asd-file asd-path)))
+    (asd-file-add-module-component asd component-path component-name)
     ;;Spit out the new system file
     (with-output-to-file (stream asd-path :if-exists :supersede :external-format :utf-8)
       (write-asd-file asd stream))
     t))
 
-(defun rename-component (asd-path component-path new-name
-                         &aux
-                           (system-name (first component-path)))
-  (declare (ignore system-name))
-  (when-let* ((asd (read-asd-file asd-path))
-              ;;TODO need to find system by name
-              (system (efirst (asd-file-systems asd))))
-    (system-rename-component system (rest component-path) new-name)
+(defun rename-component (asd-path component-path new-name)
+  (when-let* ((asd (read-asd-file asd-path)))
+    (asd-file-rename-component asd component-path new-name)
     ;;Spit out the new system file
     (with-output-to-file (stream asd-path :if-exists :supersede :external-format :utf-8)
       (write-asd-file asd stream))
     t))
 
-(defun remove-component (asd-path component-path
-                         &aux
-                           (system-name (first component-path)))
-  (declare (ignore system-name))
-  (when-let* ((asd (read-asd-file asd-path))
-              ;;TODO need to find system by name
-              (system (efirst (asd-file-systems asd))))
-    (system-remove-component system (rest component-path))
+(defun remove-component (asd-path component-path)
+  (when-let* ((asd (read-asd-file asd-path)))
+    (asd-file-remove-component asd component-path)
     ;;Spit out the new system file
     (with-output-to-file (stream asd-path :if-exists :supersede :external-format :utf-8)
       (write-asd-file asd stream))
     t))
 
-(defun add-depends-on (asd-path component-path dependency-name
-                       &aux
-                         (system-name (first component-path)))
-  (declare (ignore system-name))
-  (when-let* ((asd (read-asd-file asd-path))
-              ;;TODO need to find system by name
-              (system (efirst (asd-file-systems asd))))
-    (system-add-depends-on system (rest component-path) (make-symbol (string-upcase dependency-name)))
+(defun add-depends-on (asd-path component-path dependency-name)
+  (when-let* ((asd (read-asd-file asd-path)))
+    (asd-file-add-depends-on asd component-path (make-symbol (string-upcase dependency-name)))
     ;;Spit out the new system file
     (with-output-to-file (stream asd-path :if-exists :supersede :external-format :utf-8)
       (write-asd-file asd stream))
     t))
 
-(defun remove-depends-on (asd-path component-path dependency-name
-                         &aux
-                           (system-name (first component-path)))
-  (declare (ignore system-name))
-  (when-let* ((asd (read-asd-file asd-path))
-              ;;TODO need to find system by name
-              (system (efirst (asd-file-systems asd))))
-    (system-remove-depends-on system (rest component-path) dependency-name)
+(defun remove-depends-on (asd-path component-path dependency-name)
+  (when-let* ((asd (read-asd-file asd-path)))
+    (asd-file-remove-depends-on asd component-path dependency-name)
     ;;Spit out the new system file
     (with-output-to-file (stream asd-path :if-exists :supersede :external-format :utf-8)
       (write-asd-file asd stream))

@@ -183,15 +183,19 @@ When `delete' is non-nil, delete that system from disk."
     ;;Copy the file over
     (let ((new-name (expand-file-name (file-name-nondirectory file) dir)))
       (cond
-       ((or (not (file-exists-p new-name))
-            (y-or-n-p "a file with the name '%s' already exists. overwrite?" (file-name-nondirectory file)))
-        (copy-file file new-name t t)
-        (clution--cl-clution-eval
-         `(add-file-component ',system-path ',node-id ',(file-name-base file)))
-        (clution--update-system-query system)
-        (clution--sync-buffers *clution--current-clution*))
-       (t ;;try again
-        (clution--add-system-file node))))))
+       ((not (file-exists-p new-name))
+        (copy-file file new-name nil t))
+       ((file-equal-p file new-name)
+        ;;Same file. Do nothing
+        )
+       ((y-or-n-p (format "a file with the name '%s' already exists. overwrite?" (file-name-nondirectory file)))
+        (copy-file file new-name t t))
+       (t ;;do nothing. leave original file.
+        ))
+      (clution--cl-clution-eval
+       `(add-file-component ',system-path ',node-id ',(file-name-base file)))
+      (clution--update-system-query system)
+      (clution--sync-buffers *clution--current-clution*))))
 
 (defun clution--create-system-file (node)
   )

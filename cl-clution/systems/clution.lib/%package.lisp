@@ -1,4 +1,4 @@
-;;;asd-serializer - read/writer for asdf asd files
+;;;clution.lib - project development tools for CL
 ;;;Written in 2018 by Wilfredo Velázquez-Rodríguez <zulu.inuoe@gmail.com>
 ;;;
 ;;;To the extent possible under law, the author(s) have dedicated all copyright
@@ -8,7 +8,7 @@
 ;;;with this software. If not, see
 ;;;<http://creativecommons.org/publicdomain/zero/1.0/>.
 
-(defpackage #:asd-serializer
+(defpackage #:%clution.lib
   (:use
    #:alexandria
    #:cl
@@ -16,15 +16,13 @@
    #:enumerable
    #:parse-float)
   (:export
-   #:read-asd-file
-   #:write-asd-file
+   ;;;util
+   #:*%eol-sequences*
 
-   #:asd-file-system-plists
-   #:asd-file-add-file-component
-   #:asd-file-add-module-component
-   #:asd-file-rename-component
-   #:asd-file-move-component-up
-   #:asd-file-move-component-down
-   #:asd-file-remove-component
-   #:asd-file-add-depends-on
-   #:asd-file-remove-depends-on))
+   #:%whitespacep
+   #:%terminating-p
+   #:%cell-before
+   #:%cell-after
+   #:%item-before
+   #:%item-after
+   #:%guess-eol-style))

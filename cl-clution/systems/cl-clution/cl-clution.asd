@@ -9,7 +9,7 @@
   ((:file "package")
    (:file "cl-clution"))
   :depends-on
-  (#:asd-serializer
-   #:alexandria
+  (#:alexandria
    #:enumerable
-   #:cl-arrows))
+   #:cl-arrows
+   #:clution.lib))

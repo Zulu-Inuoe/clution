@@ -1,4 +1,4 @@
-;;;asd-serializer - read/writer for asdf asd files
+;;;clution.lib - project development tools for CL
 ;;;Written in 2018 by Wilfredo Velázquez-Rodríguez <zulu.inuoe@gmail.com>
 ;;;
 ;;;To the extent possible under law, the author(s) have dedicated all copyright
@@ -8,18 +8,25 @@
 ;;;with this software. If not, see
 ;;;<http://creativecommons.org/publicdomain/zero/1.0/>.
 
-(defsystem #:asd-serializer
+(defsystem #:clution.lib
   :version "0.0.0"
-  :description "Read/Write Access for ASDF ASD files."
+  :description "Project development tools for CL."
   :author "Wilfredo Velázquez-Rodríguez <zulu.inuoe@gmail.com>"
   :license "CC0 <http://creativecommons.org/publicdomain/zero/1.0/>"
   :serial t
   :components
-  ((:file "package")
+  ((:file "%package")
    (:file "util")
-   (:file "lexer")
-   (:file "parser")
-   (:file "asd-serializer"))
+   (:module "cl-sexp"
+    :components
+    ((:file "package")
+     (:file "parser")
+     (:file "lexer")))
+   (:module "asd"
+    :components
+    ((:file "package")
+     (:file "asd")))
+   (:file "package"))
   :depends-on
   (#:alexandria
    #:cl-arrows

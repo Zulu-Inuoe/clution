@@ -1,4 +1,4 @@
-;;;asd-serializer - read/writer for asdf asd files
+;;;clution.lib - project development tools for CL
 ;;;Written in 2018 by Wilfredo Velázquez-Rodríguez <zulu.inuoe@gmail.com>
 ;;;
 ;;;To the extent possible under law, the author(s) have dedicated all copyright
@@ -8,7 +8,7 @@
 ;;;with this software. If not, see
 ;;;<http://creativecommons.org/publicdomain/zero/1.0/>.
 
-(in-package #:asd-serializer)
+(in-package #:clution.lib.cl-sexp)
 
 (defgeneric %write-node (node stream))
 
@@ -36,17 +36,26 @@
     :initform (error "sexp-opaque-node: must supply text")
     :reader opaque-node-text)))
 
+(defun %opaque-node-p (node)
+  (typep node 'sexp-opaque-node))
+
 (defmethod %write-node ((node sexp-opaque-node) stream)
   (format stream "~A" (opaque-node-text node)))
 
 (defclass sexp-whitespace-node (sexp-opaque-node)
   ())
 
+(defun %whitespace-node-p (node)
+  (typep node 'sexp-whitespace-node))
+
 (defclass sexp-parent-node (sexp-node)
   ((children
     :initform nil
     :type list
     :accessor children)))
+
+(defun %parent-node-p (node)
+  (typep node 'sexp-parent-node))
 
 (defun vchildren (parent-node)
   (where (children parent-node) (lambda (n) (not (typep n 'sexp-opaque-node)))))
@@ -58,6 +67,9 @@
 
 (defclass sexp-list-node (sexp-parent-node)
   ())
+
+(defun %list-node-p (node)
+  (typep node 'sexp-list-node))
 
 (defmethod print-object ((object sexp-list-node) stream)
   (print-unreadable-object (object stream :type t)
@@ -114,6 +126,9 @@
     :reader symbol-node-package)
    (external-ref-p
     :reader symbol-node-external-ref-p)))
+
+(defun %symbol-node-p (node)
+  (typep node 'sexp-symbol-node))
 
 (defmethod initialize-instance ((obj sexp-symbol-node)
                                 &key
@@ -173,6 +188,9 @@
     :initarg :string
     :initform (error "Must supply string")
     :reader string-node-string)))
+
+(defun %string-node-p (node)
+  (typep node 'sexp-string-node))
 
 (defmethod token-text ((token sexp-string-node))
   (format nil "~S" (string-node-string token)))

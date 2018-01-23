@@ -33,7 +33,7 @@
                     (cdr p)
                     *load-truename*)))
                 '(("cl-clution" . "systems/cl-clution/cl-clution.asd")
-                  ("asd-serializer" . "systems/asd-serializer/asd-serializer.asd")))))
+                  ("clution.lib" . "systems/clution.lib/clution.lib.asd")))))
           (flet
               ((clution-system-searcher
                    (system-name)

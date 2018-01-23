@@ -3,9 +3,9 @@
 (defpackage #:cl-clution
   (:use
    #:alexandria
-   #:asd-serializer
    #:cl
    #:cl-arrows
+   #:clution.lib.asd
    #:enumerable)
   (:export
    #:main))

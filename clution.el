@@ -3482,6 +3482,7 @@ generated clution files."
     (unless (file-exists-p asd-clution-path)
       (unless type
         (setf type (clution--read-system-type "System type: ")))
+      (clution--cl-clution-start)
       (let ((clution (clution--make-asd-clution path type)))
         (clution--save-clution clution)))
     (clution-open asd-clution-path)))

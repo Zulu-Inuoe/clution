@@ -245,7 +245,7 @@ When `delete' is non-nil, delete that system from disk."
                (file-name-as-directory
                 (expand-file-name
                  new-name
-                 (file-name-directory old-path)))))
+                 (file-name-directory (directory-file-name old-path))))))
          (rename-file old-path new-path))))
     (clution--cl-clution-eval `(rename-component ,(clution--system.path (clution--node.system node)) ',(clution--node.node-id node) ,new-name))
     (clution--update-system-query (clution--node.system node))

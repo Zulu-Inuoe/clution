@@ -250,6 +250,20 @@
     (%append-to-list-node module (make-instance 'sexp-list-node :children ())))
   (values))
 
+(defun module-component-by-path (module component-path)
+  (labels ((recurse (node path)
+             (cond
+               ((move-next path)
+                (when-let* ((components (module-components node))
+                            (child (efirst* (vchildren components)
+                                            (lambda (child)
+                                              (string= (%coerce-name-string (component-name child))
+                                                       (current path))))))
+                  (recurse child path)))
+               (t
+                node))))
+    (recurse module (get-enumerator component-path))))
+
 (defun module-ensure-depends-on (module)
   (unless (component-depends-on module)
     (%append-to-list-node module (make-instance 'sexp-symbol-node :name "DEPENDS-ON" :package :keyword))
@@ -356,25 +370,20 @@
   (values))
 
 (defun system-component-by-path (system component-path)
-  (labels ((recurse (node path)
-             (cond
-               ((move-next path)
-                (when-let* ((components (module-components node))
-                            (child (efirst* (vchildren components)
-                                            (lambda (child)
-                                              (string= (string-node-string (component-name child))
-                                                       (current path))))))
-                  (recurse child path)))
-               (t
-                node))))
-    (recurse system (get-enumerator component-path))))
+  (module-component-by-path system component-path))
 
 (defun system-rename-component (system component-path new-name)
-  (let ((component (system-component-by-path system component-path)))
+  (let ((component (system-component-by-path system component-path))
+        (new-component (system-component-by-path system (-> component-path
+                                                            (skip-last 1)
+                                                            (eappend new-name)))))
     (unless component
       (error "component does not exist: '~A'" component-path))
+    (when new-component
+      (error "cannot rename to '~A': component already exists with that name" new-name))
     (when (component-pathname component)
       (error "cannot yet handle components with pathnames"))
+
     (let ((name-prop (component-name component)))
       (setf (string-node-string name-prop) new-name))))
 
@@ -383,6 +392,8 @@
   (let ((module (system-component-by-path system  module-path)))
     (unless module
       (error "module does not exist: '~A'" module-path))
+    (when (module-component-by-path module (%coerce-component-path name))
+      (error "component already exists in module: ~A" name))
     (module-ensure-components module)
 
     (let ((components (module-components module)))
@@ -393,6 +404,8 @@
   (let ((module (system-component-by-path system  module-path)))
     (unless module
       (error "module does not exist: '~A'" module-path))
+    (when (module-component-by-path module (%coerce-component-path name))
+      (error "component already exists in module: ~A" name))
     (module-ensure-components module)
 
     (let* ((components (module-components module)))
@@ -422,29 +435,34 @@
   (let ((module (system-component-by-path system  module-path)))
     (unless module
       (error "module does not exist: '~A'" module-path))
+    (let ((depends-on (component-depends-on module)))
+      (unless depends-on
+        (error "no such dependency '~A'" name))
 
-    (when-let* ((depends-on (component-depends-on module))
-                (node (efirst* (vchildren depends-on)
-                               (lambda (node)
-                                 (string= (%coerce-name-string node) name)))))
-      (let* ((cell (member node (children depends-on))))
-        ;;Delete any white space that follows it
-        (loop :while (and (cdr cell) (%whitespace-node-p (cadr cell)))
-              :do (setf (cdr cell) (cddr cell)))
+      (let* ((node (efirst* (vchildren depends-on)
+                            (lambda (node)
+                              (string= (%coerce-name-string node) name)))))
+        (unless node
+          (error "no such dependency: '~A'" name))
 
-        ;;If it's the last node in the parent, remove whitespace before it, too
-        (when (null (cdr cell))
-          (loop
-            :for prev-cell := (%cell-before node (children depends-on))
-            :while (and prev-cell (%whitespace-node-p (car prev-cell)))
-            :do (setf (children depends-on) (delete (car prev-cell) (children depends-on)))))
+        (let* ((cell (member node (children depends-on))))
+          ;;Delete any white space that follows it
+          (loop :while (and (cdr cell) (%whitespace-node-p (cadr cell)))
+                :do (setf (cdr cell) (cddr cell)))
 
-        ;;Delete it
-        (setf (children depends-on) (delete node (children depends-on)))
+          ;;If it's the last node in the parent, remove whitespace before it, too
+          (when (null (cdr cell))
+            (loop
+              :for prev-cell := (%cell-before node (children depends-on))
+              :while (and prev-cell (%whitespace-node-p (car prev-cell)))
+              :do (setf (children depends-on) (delete (car prev-cell) (children depends-on)))))
 
-        ;;If there is only whitespace left, then clear out all children
-        (when (all (children depends-on) #'%whitespace-node-p)
-          (setf (children depends-on) nil))))))
+          ;;Delete it
+          (setf (children depends-on) (delete node (children depends-on)))
+
+          ;;If there is only whitespace left, then clear out all children
+          (when (all (children depends-on) #'%whitespace-node-p)
+            (setf (children depends-on) nil)))))))
 
 (defun system-move-component-up (system component-path)
   (setf component-path (%coerce-component-path component-path))

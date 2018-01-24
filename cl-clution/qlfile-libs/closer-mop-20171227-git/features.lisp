@@ -1,4 +1,4 @@
-:abcl1.4.0
+:abcl1.5.0
 #| all features implemented |#
 
 :allegro8.2-9.0
@@ -36,7 +36,7 @@
  (:subclasses-of-standard-writer-method-do-not-inherit-exported-slots)
  (:t-is-always-a-valid-superclass))
 
-:allegro10.0
+:allegro10.0-10.1
 ((:class-default-initargs)
  (:class-direct-default-initargs)
  (:defgeneric-calls-find-method-combination)
@@ -83,7 +83,7 @@
  (:remove-method-calls-compute-discriminating-function)
  (:subclasses-of-method-combination-do-not-inherit-exported-slots))
 
-:clozure-common-lisp1.11
+:clozure-common-lisp1.11.5
 ((:add-method-calls-compute-discriminating-function fixed)
  (:compute-slots-requested-slot-order-honoured)
  (:defmethod-calls-generic-function-method-class fixed)
@@ -117,7 +117,7 @@
  (:subclasses-of-standard-accessor-method-do-not-inherit-exported-slots)
  (:subclasses-of-standard-writer-method-do-not-inherit-exported-slots))
 
-:cmu21b
+:cmu21c
 ((:accessor-method-initialized-with-function fixed)
  (:accessor-method-initialized-with-lambda-list fixed)
  (:accessor-method-initialized-with-slot-definition fixed)
@@ -316,7 +316,7 @@
  (:subclasses-of-standard-slot-definition-do-not-inherit-exported-slots)
  (:subclasses-of-standard-writer-method-do-not-inherit-exported-slots))
 
-:sbcl1.3.16
+:sbcl1.4.2
 #| all features implemented |#
 
 :scl1.3.9

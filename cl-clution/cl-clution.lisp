@@ -1,10 +1,16 @@
 (eval-when
     (:compile-toplevel :load-toplevel :execute)
-  (handler-bind ((error (lambda (e)
-                           (format *error-output* "Error requiring ASDF:~%~T~A" e))))
+  (handler-bind
+      ((error
+        (lambda
+          (e)
+          (format *error-output* "Error requiring ASDF:~%~T~A" e))))
     (require 'asdf))
-  (handler-bind ((error (lambda (e)
-                          (format *error-output* "Error requiring UIOP:~%~T~A" e))))
+  (handler-bind
+      ((error
+        (lambda
+          (e)
+          (format *error-output* "Error requiring UIOP:~%~T~A" e))))
     (require 'uiop)))
 (eval-when
     (:compile-toplevel :load-toplevel :execute)
@@ -12,50 +18,49 @@
       (progn
         (let
             ((qlfile-libs-paths
-               (directory
-                (merge-pathnames "qlfile-libs/**/*.asd" *load-truename*))))
+              (directory
+               (merge-pathnames "qlfile-libs/**/*.asd" *load-truename*))))
           (flet
               ((clution-qlfile-libs-searcher
-                   (system-name)
-                 (loop :for path :in qlfile-libs-paths :if
-                                                       (string-equal system-name
-                                                                     (pathname-name path))
-                       :return path)))
+                (system-name)
+                (loop :for path :in qlfile-libs-paths :if
+                      (string-equal system-name
+                                    (pathname-name path))
+                      :return path)))
             (push #'clution-qlfile-libs-searcher asdf:*system-definition-search-functions*)))
         (let
             ((clution-systems-alist
-               (mapcar
-                (lambda
-                    (p)
-                  (cons
-                   (car p)
-                   (merge-pathnames
-                    (cdr p)
-                    *load-truename*)))
-                '(("cl-clution" . "systems/cl-clution/cl-clution.asd")
-                  ("clution.lib" . "systems/clution.lib/clution.lib.asd")))))
+              (mapcar
+               (lambda
+                 (p)
+                 (cons
+                  (car p)
+                  (merge-pathnames
+                   (cdr p)
+                   *load-truename*)))
+               '(("cl-clution" . "systems/cl-clution/cl-clution.asd")))))
           (flet
               ((clution-system-searcher
-                   (system-name)
-                 (loop :for
-                       (name . path)
-                         :in clution-systems-alist :if
-                                                   (string-equal system-name name)
-                       :return
-                       (parse-namestring path))))
+                (system-name)
+                (loop :for
+                      (name . path)
+                      :in clution-systems-alist :if
+                      (string-equal system-name name)
+                      :return
+                      (parse-namestring path))))
             (push #'clution-system-searcher asdf:*system-definition-search-functions*)))
         (let
             ((*standard-output*
-               (make-broadcast-stream))
+              (make-broadcast-stream))
              (*trace-output*
-               (make-broadcast-stream))
+              (make-broadcast-stream))
              (*error-output*
-               (make-broadcast-stream)))
+              (make-broadcast-stream)))
           (asdf:load-system "cl-clution" :verbose nil)))
     (error
-      (e)
-      (format *error-output* "Error loading systems:~%~T~A" e)
-      (uiop:quit 1 cl:t))))
+     (e)
+     (format *error-output* "Error loading systems:~%~T~A" e)
+     (uiop:quit -1 cl:t))))
 (handler-case
     (let
         ((ret-code
@@ -68,4 +73,4 @@
   (error
    (e)
    (format *error-output* "Uncaught error:~%~T~A" e)
-   (uiop:quit 1 cl:t)))
+   (uiop:quit -1 cl:t)))

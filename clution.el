@@ -3001,14 +3001,14 @@ See `file-notify-add-watch'"
     (cl-case action
       (created)
       (deleted
-       (let ((system (car (cl-rassoc descriptor *clution--system-watches*))))
+       (let ((system (car (cl-rassoc descriptor *clution--system-watches* :test 'equal))))
          (unless system
            (error "clution: could not find system for descriptor '%s' (%s)" descriptor file))
          ;; (message "clution: Unloading system '%s' (deleted %S)" (clution--system.name system) file)
          (setf (getf system :query-node) nil)
          (clution--sync-buffers *clution--current-clution*)))
       (changed
-       (let ((system (car (cl-rassoc descriptor *clution--system-watches*))))
+       (let ((system (car (cl-rassoc descriptor *clution--system-watches* :test 'equal))))
          (unless system
            (error "clution: could not find system for descriptor '%s' (%s)" descriptor file))
          ;; (message "clution: Reloading system '%s' (changed %S)" (clution--system.name system) file)

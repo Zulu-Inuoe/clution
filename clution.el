@@ -141,11 +141,30 @@ Arguments accepted:
   "Perform a system query operation on `system' and returns the result."
   (clution--translate-system-plist system (car (clution--cl-clution-eval `(asd-plists ,(clution--system.path system))))))
 
+(defun clution--watch-systems (clution)
+  (dolist (system (clution--clution.systems clution))
+    (clution--watch-system system)))
+
+(defun clution--unwatch-systems (clution)
+  (dolist (system (clution--clution.systems clution))
+    (clution--unwatch-system system)))
+
+(defun clution--watch-system (system)
+  (push (cons system (file-notify-add-watch (clution--system.path system) '(change) 'clution--system-file-watch-callback))
+        *clution--system-watches*))
+
+(defun clution--unwatch-system (system)
+  (when-let ((cell (cl-assoc system *clution--system-watches*)))
+    (file-notify-rm-watch (cdr cell))
+    (setf *clution--system-watches* (cl-delete cell *clution--system-watches*))))
+
 (defun clution--add-system (clution path type)
   "Adds the system at `path' to the given `clution'"
   (let ((system (clution--make-system
                  (list :path path :type type))))
-    (clution--clution.add-system clution system))
+    (clution--clution.add-system clution system)
+    ;;Add file watch for the new system
+    (clution--watch-system system))
   (clution--save-clution clution))
 
 (defun clution--select-system (system)
@@ -165,6 +184,7 @@ When `delete' is non-nil, delete that system from disk."
       (error "clution: system has no parent clution"))
     (when (y-or-n-p (format "confirm: Remove system '%s'" (clution--system.name system)))
       (clution--clution.remove-system clution system)
+      (clution--unwatch-system system)
       (clution--save-clution clution))))
 
 (defun clution--add-system-file (node)
@@ -193,9 +213,7 @@ When `delete' is non-nil, delete that system from disk."
        (t ;;do nothing. leave original file.
         ))
       (clution--cl-clution-eval
-       `(add-file-component ',system-path ',node-id ',(file-name-base file)))
-      (clution--update-system-query system)
-      (clution--sync-buffers *clution--current-clution*))))
+       `(add-file-component ',system-path ',node-id ',(file-name-base file))))))
 
 (defun clution--create-system-file (node)
   )
@@ -213,20 +231,13 @@ When `delete' is non-nil, delete that system from disk."
         (make-directory dir-name t)))
 
     (clution--cl-clution-eval
-     `(add-module-component ',system-path ',node-id ',module))
-
-    (clution--update-system-query system)
-    (clution--sync-buffers *clution--current-clution*)))
+     `(add-module-component ',system-path ',node-id ',module))))
 
 (defun clution--move-system-item-up (node)
-  (clution--cl-clution-eval `(move-component-up ',(clution--system.path (clution--node.system node)) ',(clution--node.node-id node)))
-  (clution--update-system-query (clution--node.system node))
-  (clution--sync-buffers *clution--current-clution*))
+  (clution--cl-clution-eval `(move-component-up ',(clution--system.path (clution--node.system node)) ',(clution--node.node-id node))))
 
 (defun clution--move-system-item-down (node)
-  (clution--cl-clution-eval `(move-component-down ',(clution--system.path (clution--node.system node)) ',(clution--node.node-id node)))
-  (clution--update-system-query (clution--node.system node))
-  (clution--sync-buffers *clution--current-clution*))
+  (clution--cl-clution-eval `(move-component-down ',(clution--system.path (clution--node.system node)) ',(clution--node.node-id node))))
 
 (defun clution--rename-system-item (node)
   (let ((new-name
@@ -247,25 +258,19 @@ When `delete' is non-nil, delete that system from disk."
                  new-name
                  (file-name-directory (directory-file-name old-path))))))
          (rename-file old-path new-path))))
-    (clution--cl-clution-eval `(rename-component ,(clution--system.path (clution--node.system node)) ',(clution--node.node-id node) ,new-name))
-    (clution--update-system-query (clution--node.system node))
-    (clution--sync-buffers *clution--current-clution*)))
+    (clution--cl-clution-eval `(rename-component ,(clution--system.path (clution--node.system node)) ',(clution--node.node-id node) ,new-name))))
 
 (defun clution--remove-system-item (node &optional delete)
   (cond
    ((not delete)
     (when (y-or-n-p (format "confirm: Remove component '%s'" (clution--node.name node)))
-      (clution--cl-clution-eval `(remove-component ,(clution--system.path (clution--node.system node)) ',(clution--node.node-id node)))
-      (clution--update-system-query (clution--node.system node))
-      (clution--sync-buffers *clution--current-clution*)))
+      (clution--cl-clution-eval `(remove-component ,(clution--system.path (clution--node.system node)) ',(clution--node.node-id node)))))
    (t
     (when (y-or-n-p (format "confirm: Permanently delete component '%s'" (clution--node.name node)))
       (if (directory-name-p (clution--node.path node))
           (delete-directory (clution--node.path node) t)
         (delete-file (clution--node.path node)))
-      (clution--cl-clution-eval `(remove-component ,(clution--system.path (clution--node.system node)) ',(clution--node.node-id node)))
-      (clution--update-system-query (clution--node.system node))
-      (clution--sync-buffers *clution--current-clution*)))))
+      (clution--cl-clution-eval `(remove-component ,(clution--system.path (clution--node.system node)) ',(clution--node.node-id node)))))))
 
 (defun clution--add-system-dependency (node)
   (let* ((system (clution--node.system node))
@@ -274,10 +279,7 @@ When `delete' is non-nil, delete that system from disk."
          (dependency (read-string "dependency to add: ")))
 
     (clution--cl-clution-eval
-     `(add-depends-on ',system-path ',node-id ',dependency))
-
-    (clution--update-system-query system)
-    (clution--sync-buffers *clution--current-clution*)))
+     `(add-depends-on ',system-path ',node-id ',dependency))))
 
 (defun clution--remove-system-dependency (node dependency)
   (let* ((system (clution--node.system node))
@@ -285,10 +287,7 @@ When `delete' is non-nil, delete that system from disk."
          (node-id (clution--node.node-id node)))
 
     (clution--cl-clution-eval
-     `(remove-depends-on ',system-path ',node-id ',dependency))
-
-    (clution--update-system-query system)
-    (clution--sync-buffers *clution--current-clution*)))
+     `(remove-depends-on ',system-path ',node-id ',dependency))))
 
 (defvar *clution--current-clution* nil
   "The currently open clution.")
@@ -296,6 +295,10 @@ When `delete' is non-nil, delete that system from disk."
 (defvar *clution--current-watch* nil
   "file watch as per `file-notify-add-watch' which monitors the current clution's
 file for changes.")
+
+(defvar *clution--system-watches* nil
+  "alist of systems to their file watches as per `file-notify-add-watch',
+which monitor the current clution's asd files for changes.")
 
 (defvar *clution--repl-active* nil
   "non-nil if there is a clution repl currently active.")
@@ -421,10 +424,14 @@ Returns the window displaying the buffer"
                  (clution (clution--system.clution system))
                  (selected (eq system (clution--clution.selected-system)))
                  (node (clution--system.query-node system))
+                 (loaded (clution--system.loaded system))
                  (fold-map (make-sparse-keymap))
                  (fold-button
                   (insert-button
-                   (if (clution--node.folded node) "▸ " "▾ ")
+                   (cond
+                    ((not loaded) "✘ ")
+                    ((clution--node.folded node) "▸ ")
+                    (t "▾ "))
                    'face 'clution-clutex-system-face
                    'help-echo nil
                    'keymap fold-map))
@@ -437,156 +444,193 @@ Returns the window displaying the buffer"
                            'clution-clutex-system-face)
                    'help-echo nil
                    'keymap map)))
-    (define-key fold-map (kbd "C-m")
-      (lambda ()
-        (interactive)
-        (clution--toggle-system-fold system)))
-    (define-key fold-map (kbd "TAB")
-      (lambda ()
-        (interactive)
-        (clution--toggle-system-fold system)))
-    (define-key fold-map (kbd "<mouse-1>")
-      (lambda ()
-        (interactive)
-        (clution--toggle-system-fold system)))
-    (define-key map (kbd "TAB")
-      (lambda ()
-        (interactive)
-        (clution--toggle-system-fold system)))
-    (define-key map (kbd "<mouse-1>")
-      (lambda ()
-        (interactive)
-        (clution--toggle-system-fold system)))
-    (define-key fold-map (kbd "<delete>")
-      (lambda ()
-        (interactive)
-        (clution--remove-system system)))
-    (define-key map (kbd "<delete>")
-      (lambda ()
-        (interactive)
-        (clution--remove-system system)))
-    (define-key fold-map (kbd "D")
-      (lambda ()
-        (interactive)
-        (clution--remove-system system)))
-    (define-key map (kbd "D")
-      (lambda ()
-        (interactive)
-        (clution--remove-system system)))
-    (define-key fold-map (kbd "S")
-      (lambda ()
-        (interactive)
-        (clution--select-system system)))
-    (define-key map (kbd "S")
-      (lambda ()
-        (interactive)
-        (clution--select-system system)))
-    (define-key map (kbd "C-m")
-      (lambda ()
-        (interactive)
-        (clution--clutex-open-file (clution--system.path system))))
-    (define-key map (kbd "<double-down-mouse-1>")
-      (lambda ()
-        (interactive)
-        (clution--clutex-open-file (clution--system.path system))))
-    (define-key fold-map (kbd "A")
-      (lambda ()
-        (interactive)
-        (clution--add-system-file node)))
-    (define-key map (kbd "A")
-      (lambda ()
-        (interactive)
-        (clution--add-system-file node)))
-    (define-key fold-map (kbd "N")
-      (lambda ()
-        (interactive)
-        (clution--create-system-file node)))
-    (define-key map (kbd "N")
-      (lambda ()
-        (interactive)
-        (clution--create-system-file system)))
-    (define-key fold-map (kbd "C-S-N")
-      (lambda ()
-        (interactive)
-        (clution--create-system-module node)))
-    (define-key map (kbd "C-S-N")
-      (lambda ()
-        (interactive)
-        (clution--create-system-module system)))
+    (cond
+     (loaded
+      (define-key fold-map (kbd "C-m")
+        (lambda ()
+          (interactive)
+          (clution--toggle-system-fold system)))
+      (define-key fold-map (kbd "TAB")
+        (lambda ()
+          (interactive)
+          (clution--toggle-system-fold system)))
+      (define-key fold-map (kbd "<mouse-1>")
+        (lambda ()
+          (interactive)
+          (clution--toggle-system-fold system)))
+      (define-key map (kbd "TAB")
+        (lambda ()
+          (interactive)
+          (clution--toggle-system-fold system)))
+      (define-key map (kbd "<mouse-1>")
+        (lambda ()
+          (interactive)
+          (clution--toggle-system-fold system)))
+      (define-key fold-map (kbd "<delete>")
+        (lambda ()
+          (interactive)
+          (clution--remove-system system)))
+      (define-key map (kbd "<delete>")
+        (lambda ()
+          (interactive)
+          (clution--remove-system system)))
+      (define-key fold-map (kbd "D")
+        (lambda ()
+          (interactive)
+          (clution--remove-system system)))
+      (define-key map (kbd "D")
+        (lambda ()
+          (interactive)
+          (clution--remove-system system)))
+      (define-key fold-map (kbd "S")
+        (lambda ()
+          (interactive)
+          (clution--select-system system)))
+      (define-key map (kbd "S")
+        (lambda ()
+          (interactive)
+          (clution--select-system system)))
+      (define-key map (kbd "C-m")
+        (lambda ()
+          (interactive)
+          (clution--clutex-open-file (clution--system.path system))))
+      (define-key map (kbd "<double-down-mouse-1>")
+        (lambda ()
+          (interactive)
+          (clution--clutex-open-file (clution--system.path system))))
+      (define-key fold-map (kbd "A")
+        (lambda ()
+          (interactive)
+          (clution--add-system-file node)))
+      (define-key map (kbd "A")
+        (lambda ()
+          (interactive)
+          (clution--add-system-file node)))
+      (define-key fold-map (kbd "N")
+        (lambda ()
+          (interactive)
+          (clution--create-system-file node)))
+      (define-key map (kbd "N")
+        (lambda ()
+          (interactive)
+          (clution--create-system-file system)))
+      (define-key fold-map (kbd "C-S-N")
+        (lambda ()
+          (interactive)
+          (clution--create-system-module node)))
+      (define-key map (kbd "C-S-N")
+        (lambda ()
+          (interactive)
+          (clution--create-system-module system)))
 
-    (let ((mouse-menu (make-sparse-keymap)))
-      (define-key map (kbd "<mouse-3>")
-        mouse-menu)
-      (define-key fold-map (kbd "<mouse-3>")
-        mouse-menu)
+      (let ((mouse-menu (make-sparse-keymap)))
+        (define-key map (kbd "<mouse-3>")
+          mouse-menu)
+        (define-key fold-map (kbd "<mouse-3>")
+          mouse-menu)
 
-      (define-key-after mouse-menu [build]
-        `(menu-item "Build"
-                    ,(lambda ()
-                       (interactive)
-                       (clution--clear-output)
-                       (clution--do-build (list system)))))
-      (define-key-after mouse-menu [clean]
-        `(menu-item "Clean"
-                    ,(lambda ()
-                       (interactive)
-                       (clution--clear-output)
-                       (clution--do-clean (list system)))))
-      (define-key-after mouse-menu [publish]
-        `(menu-item "Publish"
-                    ,(lambda ()
-                       (interactive)
-                       (clution--clear-output)
-                       (clution--do-publish system))))
-
-      (define-key-after mouse-menu [separator-add]
-        '(menu-item "--"))
-
-      (let ((add-menu (make-sparse-keymap)))
-        (define-key-after mouse-menu [add]
-          `(menu-item "Add" ,add-menu))
-        (define-key-after (lookup-key mouse-menu [add]) [create-file]
-          `(menu-item "New file..."
+        (define-key-after mouse-menu [build]
+          `(menu-item "Build"
                       ,(lambda ()
                          (interactive)
-                         (clution--create-system-file node))))
-        (define-key-after (lookup-key mouse-menu [add]) [add-file]
-          `(menu-item "Existing file..."
+                         (clution--clear-output)
+                         (clution--do-build (list system)))))
+        (define-key-after mouse-menu [clean]
+          `(menu-item "Clean"
                       ,(lambda ()
                          (interactive)
-                         (clution--add-system-file node))))
-        (define-key-after (lookup-key mouse-menu [add]) [create-module]
-          `(menu-item "New module..."
+                         (clution--clear-output)
+                         (clution--do-clean (list system)))))
+        (define-key-after mouse-menu [publish]
+          `(menu-item "Publish"
                       ,(lambda ()
                          (interactive)
-                         (clution--create-system-module node)))))
+                         (clution--clear-output)
+                         (clution--do-publish system))))
 
-      (define-key-after mouse-menu [separator-select]
-        '(menu-item "--"))
+        (define-key-after mouse-menu [separator-add]
+          '(menu-item "--"))
 
-      (define-key-after mouse-menu [select]
-        `(menu-item "Set as Selected System"
-                    ,(lambda ()
-                       (interactive)
-                       (clution--select-system system))))
+        (let ((add-menu (make-sparse-keymap)))
+          (define-key-after mouse-menu [add]
+            `(menu-item "Add" ,add-menu))
+          (define-key-after (lookup-key mouse-menu [add]) [create-file]
+            `(menu-item "New file..."
+                        ,(lambda ()
+                           (interactive)
+                           (clution--create-system-file node))))
+          (define-key-after (lookup-key mouse-menu [add]) [add-file]
+            `(menu-item "Existing file..."
+                        ,(lambda ()
+                           (interactive)
+                           (clution--add-system-file node))))
+          (define-key-after (lookup-key mouse-menu [add]) [create-module]
+            `(menu-item "New module..."
+                        ,(lambda ()
+                           (interactive)
+                           (clution--create-system-module node)))))
 
-      (define-key-after mouse-menu [separator-delete]
-        '(menu-item "--"))
+        (define-key-after mouse-menu [separator-select]
+          '(menu-item "--"))
 
-      (define-key-after mouse-menu [delete]
-        `(menu-item "Remove"
-                    ,(lambda ()
-                       (interactive)
-                       (clution--remove-system system))))
+        (define-key-after mouse-menu [select]
+          `(menu-item "Set as Selected System"
+                      ,(lambda ()
+                         (interactive)
+                         (clution--select-system system))))
 
-      (define-key-after mouse-menu [separator-open]
-        '(menu-item "--"))
+        (define-key-after mouse-menu [separator-delete]
+          '(menu-item "--"))
 
-      (define-key-after mouse-menu [open]
-        `(menu-item "Open"
-                    ,(lambda ()
-                       (interactive)
-                       (clution--clutex-open-file (clution--system.path system))))))
+        (define-key-after mouse-menu [delete]
+          `(menu-item "Remove"
+                      ,(lambda ()
+                         (interactive)
+                         (clution--remove-system system))))
+
+        (define-key-after mouse-menu [separator-open]
+          '(menu-item "--"))
+
+        (define-key-after mouse-menu [open]
+          `(menu-item "Open"
+                      ,(lambda ()
+                         (interactive)
+                         (clution--clutex-open-file (clution--system.path system)))))))
+     (t ;;not loaded
+      (define-key fold-map (kbd "C-m")
+        (lambda ()
+          (interactive)
+          (clution--update-system-query system)
+          (clution--sync-buffers *clution--current-clution*)))
+      (define-key map (kbd "C-m")
+        (lambda ()
+          (interactive)
+          (clution--update-system-query system)
+          (clution--sync-buffers *clution--current-clution*)))
+      (define-key fold-map (kbd "<double-down-mouse-1>")
+        (lambda ()
+          (interactive)
+          (clution--update-system-query system)
+          (clution--sync-buffers *clution--current-clution*)))
+      (define-key map (kbd "<double-down-mouse-1>")
+        (lambda ()
+          (interactive)
+          (clution--update-system-query system)
+          (clution--sync-buffers *clution--current-clution*)))
+
+      (let ((mouse-menu (make-sparse-keymap)))
+        (define-key map (kbd "<mouse-3>")
+          mouse-menu)
+        (define-key fold-map (kbd "<mouse-3>")
+          mouse-menu)
+
+        (define-key-after mouse-menu [reload]
+          `(menu-item "Reload"
+                      ,(lambda ()
+                         (interactive)
+                         (clution--update-system-query system)
+                         (clution--sync-buffers *clution--current-clution*)))))))
+
     button))
 
 (defun clution--insert-parent-button (parent)
@@ -848,6 +892,103 @@ Returns the window displaying the buffer"
                        (clution--rename-system-item child)))))
     button))
 
+(defun clution--insert-unloaded-system (system)
+  (insert-char ?\s indent)
+  (lexical-let* ((system system)
+                 (selected (eq system (clution--clution.selected-system)))
+                 (fold-button
+                  (insert-button
+                   "✘ "
+                   'face 'clution-clutex-system-face
+                   'help-echo nil
+                   'keymap fold-map))
+                 (map (make-sparse-keymap))
+                 (button
+                  (insert-button
+                   "Dependencies"
+                   'face 'clution-clutex-dependencies-face
+                   'help-echo nil
+                   'keymap map)))
+    (define-key fold-map (kbd "C-m")
+      (lambda ()
+        (interactive)
+        (clution--toggle-depends-on-fold node)))
+    (define-key fold-map (kbd "TAB")
+      (lambda ()
+        (interactive)
+        (clution--toggle-depends-on-fold node)))
+    (define-key fold-map (kbd "<mouse-1>")
+      (lambda ()
+        (interactive)
+        (clution--toggle-depends-on-fold node)))
+    (define-key map (kbd "C-m")
+      (lambda ()
+        (interactive)
+        (clution--toggle-depends-on-fold node)))
+    (define-key map (kbd "TAB")
+      (lambda ()
+        (interactive)
+        (clution--toggle-depends-on-fold node)))
+    (define-key map (kbd "<mouse-1>")
+      (lambda ()
+        (interactive)
+        (clution--toggle-depends-on-fold node)))
+    (define-key map (kbd "A")
+      (lambda ()
+        (interactive)
+        (clution--add-system-dependency node)))
+    (define-key fold-map (kbd "A")
+      (lambda ()
+        (interactive)
+        (clution--add-system-dependency node)))
+
+    (let ((mouse-menu (make-sparse-keymap)))
+      (define-key map (kbd "<mouse-3>")
+        mouse-menu)
+      (define-key fold-map (kbd "<mouse-3>")
+        mouse-menu)
+
+      (define-key-after mouse-menu [add]
+        `(menu-item "Add Dependency..."
+                    ,(lambda ()
+                       (interactive)
+                       (clution--add-system-dependency node)))))
+
+    (unless (clution--depends-on.folded node)
+      (dolist (dependency depends-on)
+        (insert "\n")
+        (insert-char ?\s (+ indent 2))
+        (lexical-let* ((dependency dependency)
+                       (dep-map (make-sparse-keymap))
+                       (dep-button (insert-button
+                                    dependency
+                                    'face 'clution-clutex-dependencies-face
+                                    'help-echo nil
+                                    'keymap dep-map)))
+          (define-key dep-map (kbd "D")
+            (lambda ()
+              (interactive)
+              (clution--remove-system-dependency node dependency)))
+          (define-key dep-map (kbd "<delete>")
+            (lambda ()
+              (interactive)
+              (clution--remove-system-dependency node dependency)))
+          (define-key dep-map (kbd "A")
+            (lambda ()
+              (interactive)
+              (clution--add-system-dependency node)))
+
+          (let ((mouse-map (make-sparse-keymap)))
+            (define-key dep-map (kbd "<mouse-3>")
+              mouse-map)
+
+            (define-key-after mouse-map [remove]
+              `(menu-item "Remove"
+                          ,(lambda ()
+                             (interactive)
+                             (clution--remove-system-dependency node dependency))))))))
+    button))
+
 (defun clution--insert-depends-on (node indent)
   (insert-char ?\s indent)
   (lexical-let* ((node node)
@@ -972,7 +1113,7 @@ Returns the window displaying the buffer"
       (insert "  ")
       (clution--insert-system-button system)
       (insert "\n")
-      (let ((node (clution--system.query-node system)))
+      (when-let ((node (clution--system.query-node system)))
         (unless (clution--node.folded node)
           (clution--insert-depends-on node 4)
           (insert "\n")
@@ -1129,8 +1270,12 @@ Returns the window displaying the buffer"
 
 ;;;; Clution/System data structures, and loaders
 (defun clution--update-system-query (system)
-  (when-let ((query (ignore-errors (clution--system-query system))))
-    (setf (cl-getf system :query-node) query)))
+  (setf (cl-getf system :query-node)
+        (condition-case err
+            (clution--system-query system)
+          (error
+           (warn "clution: error loading system '%s': %s" (clution--system.name system) err)
+           nil))))
 
 (defun clution--insert-system (system indent)
   (let ((clution (clution--system.clution system)))
@@ -1166,7 +1311,7 @@ Returns the window displaying the buffer"
           :toplevel (cl-getf data :toplevel)
           :type (cl-getf data :type)
           :query-node nil)))
-    (setf (cl-getf res :query-node) (clution--system-query res))
+    (clution--update-system-query res)
     res))
 
 (defun clution--insert-cuo (cuo indent)
@@ -1544,6 +1689,9 @@ Returns the window displaying the buffer"
 
 (defun clution--system.name (clution-system)
   (downcase (file-name-base (clution--system.path clution-system))))
+
+(defun clution--system.loaded (clution-system)
+  (and (clution--system.query-node clution-system) t))
 
 (defun clution--system.set-name (clution-system name)
   (let ((path (expand-file-name name (clution--system.dir clution-system))))
@@ -2696,7 +2844,6 @@ Initializes ASDF and loads the selected system."
               ;;Remove the hook
               (remove-hook 'slime-connected-hook connected-hook)
               ;;Restore the previous sentinel
-              (message "Old sentinel vs new: %s %s" prev-sentinel (process-sentinel slime-inferior-process))
               (set-process-sentinel slime-inferior-process prev-sentinel)))
 
       (add-hook 'slime-connected-hook connected-hook)
@@ -2832,13 +2979,42 @@ See `file-notify-add-watch'"
       (deleted
        (clution-close))
       (changed
-       (message "Reloading clution (changed %S)" file)
+       ;; (message "clution: Reloading clution (changed %S)" file)
+       (clution--unwatch-systems *clution--current-clution*)
        (setf *clution--current-clution* (clution--parse-file file))
+       (clution--watch-systems *clution--current-clution*)
        (clution--sync-buffers *clution--current-clution*))
       (renamed
-       (message "Reloading clution (rename to %S)" file1)
+       ;; (message "clution: Reloading clution (rename to %S)" file1)
+       (clution--unwatch-systems *clution--current-clution*)
        (setf *clution--current-clution* (clution--parse-file file1))
+       (clution--watch-systems *clution--current-clution*)
        (clution--sync-buffers *clution--current-clution*))
+      (attribute-changed)
+      (stopped))))
+
+(defun clution--system-file-watch-callback (event)
+  "Callback whenever one of the current clution's system files change.
+See `file-notify-add-watch'"
+  (cl-destructuring-bind (descriptor action file &optional file1)
+      event
+    (cl-case action
+      (created)
+      (deleted
+       (let ((system (car (cl-rassoc descriptor *clution--system-watches*))))
+         (unless system
+           (error "clution: could not find system for descriptor '%s' (%s)" descriptor file))
+         ;; (message "clution: Unloading system '%s' (deleted %S)" (clution--system.name system) file)
+         (setf (getf system :query-node) nil)
+         (clution--sync-buffers *clution--current-clution*)))
+      (changed
+       (let ((system (car (cl-rassoc descriptor *clution--system-watches*))))
+         (unless system
+           (error "clution: could not find system for descriptor '%s' (%s)" descriptor file))
+         ;; (message "clution: Reloading system '%s' (changed %S)" (clution--system.name system) file)
+         (clution--update-system-query system)
+         (clution--sync-buffers *clution--current-clution*)))
+      (renamed)
       (attribute-changed)
       (stopped))))
 
@@ -3451,7 +3627,7 @@ generated clution files."
     (setf *clution--current-clution* clution)
     (setf *clution--current-watch*
           (file-notify-add-watch path '(change) 'clution--file-watch-callback))
-
+    (clution--watch-systems clution)
     (clution--sync-buffers clution))
 
   (when clution-intrusive-ui
@@ -3497,6 +3673,8 @@ generated clution files."
       (clution-end-repl))
 
     (clution--sync-buffers nil)
+
+    (clution--unwatch-systems *clution--current-clution*)
 
     (when *clution--current-watch*
       (file-notify-rm-watch *clution--current-watch*)

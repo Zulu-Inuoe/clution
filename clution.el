@@ -174,7 +174,7 @@ See `clution--clution.selected-system'"
          (cuo (clution--clution.cuo clution)))
     (setf (getf cuo :selected-system) (clution--system.name system))
     (clution--save-cuo cuo (clution--cuo.path cuo)))
-  (clution--sync-buffers *clution--current-clution*))
+  (clution--refresh-clutex))
 
 (defun clution--remove-system (system)
   "Remove `system' from its clution.
@@ -337,15 +337,15 @@ Returns the window displaying the buffer"
 (defun clution--toggle-system-fold (system)
   (let ((node (clution--system.query-node system)))
     (clution--node.set-folded node (not (clution--node.folded node))))
-  (clution--sync-buffers *clution--current-clution*))
+  (clution--refresh-clutex))
 
 (defun clution--toggle-parent-fold (parent)
   (clution--node.set-folded parent (not (clution--node.folded parent)))
-  (clution--sync-buffers *clution--current-clution*))
+  (clution--refresh-clutex))
 
 (defun clution--toggle-depends-on-fold (parent)
   (clution--depends-on.set-folded parent (not (clution--depends-on.folded parent)))
-  (clution--sync-buffers *clution--current-clution*))
+  (clution--refresh-clutex))
 
 (defun clution--insert-clution-button (clution)
   (lexical-let* ((clution clution)
@@ -601,22 +601,22 @@ Returns the window displaying the buffer"
         (lambda ()
           (interactive)
           (clution--update-system-query system)
-          (clution--sync-buffers *clution--current-clution*)))
+          (clution--refresh-clutex)))
       (define-key map (kbd "C-m")
         (lambda ()
           (interactive)
           (clution--update-system-query system)
-          (clution--sync-buffers *clution--current-clution*)))
+          (clution--refresh-clutex)))
       (define-key fold-map (kbd "<double-down-mouse-1>")
         (lambda ()
           (interactive)
           (clution--update-system-query system)
-          (clution--sync-buffers *clution--current-clution*)))
+          (clution--refresh-clutex)))
       (define-key map (kbd "<double-down-mouse-1>")
         (lambda ()
           (interactive)
           (clution--update-system-query system)
-          (clution--sync-buffers *clution--current-clution*)))
+          (clution--refresh-clutex)))
 
       (let ((mouse-menu (make-sparse-keymap)))
         (define-key map (kbd "<mouse-3>")
@@ -629,7 +629,7 @@ Returns the window displaying the buffer"
                       ,(lambda ()
                          (interactive)
                          (clution--update-system-query system)
-                         (clution--sync-buffers *clution--current-clution*)))))))
+                         (clution--refresh-clutex)))))))
 
     button))
 
@@ -1250,6 +1250,21 @@ Returns the window displaying the buffer"
     (when restoring-point-column
       (set-window-point (selected-window) (car restoring-point-column))
       (move-to-column (cdr restoring-point-column)))))
+
+(defun clution--refresh-clutex ()
+  (when-let ((buffer (clution--clutex-buffer)))
+    (clution--sync-clutex *clution--current-clution* buffer)
+    (clution--kill-buffer-if-no-window buffer)))
+
+(defun clution--refresh-output ()
+  (when-let ((buffer (clution--clutex-buffer)))
+    (clution--sync-clutex *clution--current-clution* buffer)
+    (clution--kill-buffer-if-no-window buffer)))
+
+(defun clution--refresh-output ()
+  (when-let ((buffer (clution--clutex-buffer)))
+    (clution--sync-clutex *clution--current-clution* buffer)
+    (clution--kill-buffer-if-no-window buffer)))
 
 (defun clution--sync-buffers (clution)
   (when-let ((buffer (clution--output-buffer)))
@@ -3006,14 +3021,14 @@ See `file-notify-add-watch'"
            (error "clution: could not find system for descriptor '%s' (%s)" descriptor file))
          ;; (message "clution: Unloading system '%s' (deleted %S)" (clution--system.name system) file)
          (setf (getf system :query-node) nil)
-         (clution--sync-buffers *clution--current-clution*)))
+         (clution--refresh-clutex)))
       (changed
        (let ((system (car (cl-rassoc descriptor *clution--system-watches* :test 'equal))))
          (unless system
            (error "clution: could not find system for descriptor '%s' (%s)" descriptor file))
          ;; (message "clution: Reloading system '%s' (changed %S)" (clution--system.name system) file)
          (clution--update-system-query system)
-         (clution--sync-buffers *clution--current-clution*)))
+         (clution--refresh-clutex)))
       (renamed)
       (attribute-changed)
       (stopped))))

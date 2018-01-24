@@ -1442,17 +1442,20 @@ Returns the window displaying the buffer"
           :systems nil
           :output-dir
           (when-let ((dir (cl-getf data :output-dir)))
-            (file-name-as-directory dir))
+            (file-name-as-directory
+             (expand-file-name dir (file-name-directory path))))
           :clu-dir
           (when-let ((dir (cl-getf data :clu-dir)))
-            (file-name-as-directory dir))
+            (file-name-as-directory
+             (expand-file-name dir (file-name-directory path))))
           :cuo nil
           :qlfile
           (when-let ((qlfile (cl-getf data :qlfile)))
-            qlfile)
+            (expand-file-name qlfile (file-name-directory path)))
           :qlfile-libs-dir
           (when-let ((qlfile-libs-dir (cl-getf data :qlfile-libs-dir)))
-            (file-name-as-directory qlfile-libs-dir)))))
+            (file-name-as-directory
+             (expand-file-name qlfile-libs-dir (file-name-directory path)))))))
 
     (setf (cl-getf res :systems)
           (cl-mapcar
@@ -1629,18 +1632,17 @@ Returns the window displaying the buffer"
   (unless clution
     (setf clution *clution--current-clution*))
 
-  (expand-file-name
-   (cl-getf clution :qlfile)
-   (clution--clution.dir clution)))
+  (cl-getf clution :qlfile))
 
 (defun clution--clution.set-qlfile-path (path &optional clution)
   (unless clution
     (setf clution *clution--current-clution*))
 
   (setf (cl-getf clution :qlfile)
-        (if path
-            (file-relative-name path (clution--clution.dir clution))
-          nil))
+        (cond
+         ((null path) nil)
+         ((file-name-absolute-p path) path)
+         (t (expand-file-name path (clution--clution.dir clution)))))
 
   (clution--save-clution clution))
 

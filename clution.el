@@ -3203,7 +3203,7 @@ This only matters when `clution-intrusive-ui' is enabled."
   :type 'boolean
   :group 'clution)
 
-(defcustom clution-auto-open 't
+(defcustom clution-auto-open 'nil
   "When enabled, clution will automatically open when visiting a .clu or .asd file."
   :type 'boolean
   :group 'clution)

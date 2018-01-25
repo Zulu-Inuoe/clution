@@ -352,9 +352,9 @@ Returns the window displaying the buffer"
                  (map (make-sparse-keymap))
                  (button
                   (insert-button
-                   (file-name-nondirectory
-                    (clution--clution.path clution))
+                   (clution--clution.name clution)
                    'face 'clution-clutex-clution-face
+                   'help-echo (clution--clution.path clution)
                    'keymap map)))
     (define-key map (kbd "C-m")
       (lambda ()
@@ -407,7 +407,7 @@ Returns the window displaying the buffer"
                   (insert-button
                    (file-name-nondirectory (clution--clution.qlfile-path clution))
                    'face 'clution-clutex-file-face
-                   'help-echo nil
+                   'help-echo (clution--clution.qlfile-path clution)
                    'keymap map)))
     (define-key map (kbd "C-m")
       (lambda ()
@@ -438,11 +438,11 @@ Returns the window displaying the buffer"
                  (map (make-sparse-keymap))
                  (button
                   (insert-button
-                   (file-name-nondirectory (clution--system.path system))
+                   (clution--system.name system)
                    'face (if selected
                              'clution-clutex-selected-system-face
                            'clution-clutex-system-face)
-                   'help-echo nil
+                   'help-echo (clution--system.path system)
                    'keymap map)))
     (cond
      (loaded
@@ -651,7 +651,7 @@ Returns the window displaying the buffer"
                   (insert-button
                    (concat (clution--node.name parent) "/")
                    'face 'clution-clutex-dir-face
-                   'help-echo nil
+                   'help-echo (clution--node.path parent)
                    'keymap map)))
     (define-key fold-map (kbd "C-m")
       (lambda ()
@@ -809,7 +809,7 @@ Returns the window displaying the buffer"
                   (insert-button
                    (file-name-nondirectory (clution--node.path child))
                    'face 'clution-clutex-file-face
-                   'help-echo nil
+                   'help-echo (clution--node.path child)
                    'keymap map)))
     (define-key map (kbd "C-m")
       (lambda ()

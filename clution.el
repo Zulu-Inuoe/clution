@@ -3592,6 +3592,10 @@ generated clution files."
     (when *clution--repl-active*
       (clution-end-repl))
 
+    (when *clution--current-op*
+      (warn "clution: closed in the middle of op: '%s'" (getf *clution--current-op* :type))
+      (setf *clution--current-op* nil))
+
     (clution--sync-buffers nil)
 
     (clution--unwatch-systems *clution--current-clution*)

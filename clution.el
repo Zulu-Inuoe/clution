@@ -2984,14 +2984,12 @@ See `file-notify-add-watch'"
 (defun clution--insert-system-template (name dir version description author license files depends-on)
   (insert
    (format "(defsystem #:%s
-  :name \"%s\"
   :version \"%s\"
   :description \"%s\"
   :author \"%s\"
   :license \"%s\"
   :serial t
 "
-           name
            name
            version
            description

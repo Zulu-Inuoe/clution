@@ -2261,8 +2261,7 @@ Initializes ASDF and loads the selected system."
                                   "\t\tCopying '" path "'\n"
                                   "\t\t\tto '" new-path "'\n")
                                  (copy-file path new-path nil t nil nil)))
-                               (cl-mapc #'recurse (clution--node.children node)))
-                             (clution--node.path node)))
+                               (cl-mapc #'recurse (clution--node.children node)))))
           (recurse (clution--system.query-node system))
           ;;Copy the asd itself
           (copy-file system-path
@@ -2474,24 +2473,24 @@ Initializes ASDF and loads the selected system."
   (let* ((clution (clution--system.clution (car systems)))
          (system-names (mapcar 'clution--system.name systems)))
     (slime-eval-async
-        `(cl:progn
-          (swank::collect-notes
-           (cl:lambda ()
-                      (cl:dolist (system-name ',system-names)
-                                 (cl:handler-case
-                                  (swank::with-compilation-hooks ()
-                                                                 (asdf:compile-system system-name :force t))
-                                  (asdf:compile-error ()
-                                                      nil)
-                                  (asdf/lisp-build:compile-file-error ()
-                                                                      nil))))))
-      (lexical-let ((clution clution))
-        (lambda (result)
-          (let ((default-directory (clution--clution.dir clution)))
-            (slime-compilation-finished result)
-            (clution--append-output (with-current-buffer (slime-buffer-name :compilation) (buffer-string)) "\n\n")
-            (clution--build-complete clution))))
-      "COMMON-LISP-USER")))
+     `(cl:progn
+       (swank::collect-notes
+        (cl:lambda ()
+                   (cl:dolist (system-name ',system-names)
+                              (cl:handler-case
+                               (swank::with-compilation-hooks ()
+                                                              (asdf:compile-system system-name :force t))
+                               (asdf:compile-error ()
+                                                   nil)
+                               (asdf/lisp-build:compile-file-error ()
+                                                                   nil))))))
+     (lexical-let ((clution clution))
+       (lambda (result)
+         (let ((default-directory (clution--clution.dir clution)))
+           (slime-compilation-finished result)
+           (clution--append-output (with-current-buffer (slime-buffer-name :compilation) (buffer-string)) "\n\n")
+           (clution--build-complete clution))))
+     "COMMON-LISP-USER")))
 
 (defun clution--kickoff-build-in-repl (systems)
   "Performs a build operation in the currently running repl."

@@ -64,7 +64,7 @@
     (accept-process-output *clution--cl-clution-proc*))
   (if (car *clution--cl-clution-result*)
       (cdr *clution--cl-clution-result*)
-    (error "error during cl-clution-eval: %s" (cdr *clution--cl-clution-result*))))
+    (error "%s" (cdr *clution--cl-clution-result*))))
 
 (defun clution--cl-clution-start ()
   (clution--cl-clution-stop)
@@ -117,23 +117,23 @@ Arguments accepted:
 
 (defun clution--translate-system-plist (system system-plist)
   (cl-labels ((translate-component-plist (system parent component-plist)
-                                   (let* ((component-node
-                                           (list
-                                            :system system
-                                            :parent parent
-                                            :name (cl-getf component-plist :name)
-                                            :type (cl-getf component-plist :type)
-                                            :path (cl-getf component-plist :pathname)
-                                            :children nil
-                                            :depends-on (cl-getf component-plist :depends-on))))
-                                     (setf (cl-getf component-node :children)
-                                           (cl-mapcar
-                                            (lexical-let ((component-node component-node)
-                                                          (system system))
-                                              (lambda (c)
-                                                (translate-component-plist system component-node c)))
-                                            (cl-getf component-plist :components)))
-                                     component-node)))
+                                         (let* ((component-node
+                                                 (list
+                                                  :system system
+                                                  :parent parent
+                                                  :name (cl-getf component-plist :name)
+                                                  :type (cl-getf component-plist :type)
+                                                  :path (file-truename (cl-getf component-plist :pathname))
+                                                  :children nil
+                                                  :depends-on (cl-getf component-plist :depends-on))))
+                                           (setf (cl-getf component-node :children)
+                                                 (cl-mapcar
+                                                  (lexical-let ((component-node component-node)
+                                                                (system system))
+                                                    (lambda (c)
+                                                      (translate-component-plist system component-node c)))
+                                                  (cl-getf component-plist :components)))
+                                           component-node)))
     (translate-component-plist system nil system-plist)))
 
 (defun clution--system-query (system)
@@ -207,7 +207,7 @@ When `delete' is non-nil, delete that system from disk."
        ((file-equal-p file new-name)
         ;;Same file. Do nothing
         )
-       ((y-or-n-p (format "a file with the name '%s' already exists. overwrite?" (file-name-nondirectory file)))
+       ((y-or-n-p (format "file '%s' already exists. overwrite?" file))
         (copy-file file new-name t t))
        (t ;;do nothing. leave original file.
         ))
@@ -222,7 +222,7 @@ When `delete' is non-nil, delete that system from disk."
          (system-path (clution--system.path system))
          (dir (clution--node.path node))
          (node-id (clution--node.node-id node))
-         (module (read-string "module to add: ")))
+         (module (read-string "new module name: ")))
 
     ;;Create the directory if it does not exist
     (let ((dir-name (file-name-as-directory (expand-file-name module dir))))
@@ -260,16 +260,21 @@ When `delete' is non-nil, delete that system from disk."
     (clution--cl-clution-eval `(rename-component ,(clution--system.path (clution--node.system node)) ',(clution--node.node-id node) ,new-name))))
 
 (defun clution--remove-system-item (node &optional delete)
-  (cond
-   ((not delete)
-    (when (y-or-n-p (format "confirm: Remove component '%s'" (clution--node.name node)))
-      (clution--cl-clution-eval `(remove-component ,(clution--system.path (clution--node.system node)) ',(clution--node.node-id node)))))
-   (t
-    (when (y-or-n-p (format "confirm: Permanently delete component '%s'" (clution--node.name node)))
-      (if (directory-name-p (clution--node.path node))
-          (delete-directory (clution--node.path node) t)
-        (delete-file (clution--node.path node)))
-      (clution--cl-clution-eval `(remove-component ,(clution--system.path (clution--node.system node)) ',(clution--node.node-id node)))))))
+  (let* ((system (clution--node.system node))
+         (system-path (clution--system.path system))
+         (name (clution--node.name node))
+         (path (clution--node.path node))
+         (node-id (clution--node.node-id node)))
+    (cond
+     ((not delete)
+      (when (y-or-n-p (format "confirm: Remove component '%s'? (%s)" name path))
+        (clution--cl-clution-eval `(remove-component ',system-path ',node-id))))
+     (t
+      (when (y-or-n-p (format "confirm: Permanently delete component '%s'? (%s)" name path))
+        (if (directory-name-p path)
+            (delete-directory path t)
+          (delete-file path))
+        (clution--cl-clution-eval `(remove-component ',system-path ',node-id)))))))
 
 (defun clution--add-system-dependency (node)
   (let* ((system (clution--node.system node))
@@ -806,7 +811,8 @@ Returns the window displaying the buffer"
                  (map (make-sparse-keymap))
                  (button
                   (insert-button
-                   (file-name-nondirectory (clution--node.path child))
+                   (concat (clution--node.name child)
+                           (file-name-extension (clution--node.path child) t))
                    'face 'clution-clutex-file-face
                    'help-echo (clution--node.path child)
                    'keymap map)))

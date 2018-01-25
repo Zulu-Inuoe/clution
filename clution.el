@@ -260,25 +260,36 @@ When `delete' is non-nil, delete that system from disk."
   (clution--cl-clution-eval `(move-component-down ',(clution--system.path (clution--node.system node)) ',(clution--node.node-id node))))
 
 (defun clution--rename-system-item (node)
-  (let ((new-name
-         (read-string (format "'%s' rename to: " (clution--node.name node)))))
-    (cl-case (clution--node.type node)
-      (:file
-       (let* ((old-path (clution--node.path node))
-              (new-path
-               (expand-file-name
-                (concat new-name ".lisp")
-                (file-name-directory old-path))))
-         (rename-file old-path new-path)))
-      (:module
-       (let* ((old-path (clution--node.path node))
-              (new-path
-               (file-name-as-directory
-                (expand-file-name
-                 new-name
-                 (file-name-directory (directory-file-name old-path))))))
-         (rename-file old-path new-path))))
-    (clution--cl-clution-eval `(rename-component ,(clution--system.path (clution--node.system node)) ',(clution--node.node-id node) ,new-name))))
+  (let* ((system (clution--node.system node))
+         (system-path (clution--system.path system))
+         (parent (clution--node.parent node))
+         (parent-dir (file-name-as-directory (clution--node.path parent)))
+         (old-name (clution--node.name node))
+         (old-path (clution--node.path node))
+         (node-id (clution--node.node-id node))
+         (node-type (clution--node.type node))
+         (new-name
+          (let ((str (read-string (format "'%s' rename to: " old-name))))
+            (cl-ecase node-type
+              (:file (string-remove-suffix ".lisp" str))
+              (:module (directory-file-name (file-name-as-directory str))))))
+         (new-path
+          (expand-file-name
+           (cl-ecase node-type
+             (:file (concat new-name ".lisp"))
+             (:module (file-name-as-directory new-name)))
+           parent-dir)))
+    (when (file-exists-p old-path)
+      (cl-ecase node-type
+        (:file
+         (unless (file-exists-p (file-name-directory new-path))
+           (make-directory (file-name-directory new-path) t)))
+        (:module
+         (unless (file-exists-p (file-name-directory (directory-file-name new-path)))
+           (make-directory (file-name-directory (directory-file-name new-path))))))
+      (rename-file old-path new-path))
+
+    (clution--cl-clution-eval `(rename-component ',system-path ',node-id ',new-name))))
 
 (defun clution--remove-system-item (node &optional delete)
   (let* ((system (clution--node.system node))

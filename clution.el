@@ -215,7 +215,28 @@ When `delete' is non-nil, delete that system from disk."
        `(add-file-component ',system-path ',node-id ',(file-name-base file))))))
 
 (defun clution--create-system-file (node)
-  )
+  (let* ((system (clution--node.system node))
+         (system-path (clution--system.path system))
+         (dir (clution--node.path node))
+         (node-id (clution--node.node-id node))
+         (file (string-remove-suffix ".lisp" (read-string "new file name: "))))
+
+    ;;Make sure module dir exists
+    (unless (file-exists-p dir)
+      (make-directory dir t))
+
+    (let ((file-name (expand-file-name
+                      (concat file ".lisp")
+                      dir)))
+      (when (or (not (file-exists-p file-name))
+                (y-or-n-p (format "file '%s' already exists. overwrite?" file-name)))
+        (with-temp-buffer
+          (insert
+           (format "(in-package #:%s)\n" (clution--system.name system)))
+          (write-region nil nil file-name nil nil nil t)))
+
+      (clution--cl-clution-eval
+       `(add-file-component ',system-path ',node-id ',file)))))
 
 (defun clution--create-system-module (node)
   (let* ((system (clution--node.system node))
@@ -517,7 +538,7 @@ Returns the window displaying the buffer"
       (define-key map (kbd "N")
         (lambda ()
           (interactive)
-          (clution--create-system-file system)))
+          (clution--create-system-file node)))
       (define-key fold-map (kbd "C-S-N")
         (lambda ()
           (interactive)

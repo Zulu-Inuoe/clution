@@ -533,20 +533,17 @@ Returns the window displaying the buffer"
           `(menu-item "Build"
                       ,(lambda ()
                          (interactive)
-                         (clution--clear-output)
-                         (clution--do-build (list system)))))
+                         (clution-build (list system)))))
         (define-key-after mouse-menu [clean]
           `(menu-item "Clean"
                       ,(lambda ()
                          (interactive)
-                         (clution--clear-output)
-                         (clution--do-clean (list system)))))
+                         (clution-clean (list system)))))
         (define-key-after mouse-menu [publish]
           `(menu-item "Publish"
                       ,(lambda ()
                          (interactive)
-                         (clution--clear-output)
-                         (clution--do-publish system))))
+                         (clution-publish system))))
 
         (define-key-after mouse-menu [separator-add]
           '(menu-item "--"))
@@ -1955,10 +1952,10 @@ Initializes ASDF and loads the selected system, then calls its toplevel."
                  (cl:format *error-output* "Uncaught error while running:~%~T~A" e)
                  ,(clution--exit-form 1))))))
 
-(defun clution--repl-form (clution)
+(defun clution--repl-form (system)
   "Form to initialize a repl to the given clution.
 Initializes ASDF and loads the selected system."
-  (let* ((system (clution--clution.selected-system clution))
+  (let* ((clution (clution--system.clution system))
          (system-name (clution--system.name system)))
     `(cl:progn
       ,(when (clution--clution.qlfile-p clution)
@@ -2500,21 +2497,21 @@ Initializes ASDF and loads the selected system."
   (setf *clution--current-op* nil)
   (run-hooks 'clution-build-complete-hook))
 
-(defun clution--do-run (clution &optional cont)
-  (clution--append-output
-   "Running: '" (clution--clution.name clution)
-   "' selected system: '" (clution--system.name (clution--clution.selected-system clution))
-   "' toplevel: '" (clution--system.toplevel (clution--clution.selected-system clution))
-   "'\n\n")
-
-  (setf *clution--current-op*
-        (list
-         :type 'clution-run
-         :toplevel (clution--system.toplevel (clution--clution.selected-system clution))))
-
-  (let* ((system (clution--clution.selected-system clution))
+(defun clution--do-run (system &optional cont)
+  (let* ((clution (clution--system.clution system))
          (script-path (clution--system.script-path system))
          (script-dir (file-name-directory script-path)))
+    (clution--append-output
+     "Running: '" (clution--clution.name clution)
+     "' system: '" (clution--system.name system)
+     "' toplevel: '" (clution--system.toplevel system)
+     "'\n\n")
+
+    (setf *clution--current-op*
+          (list
+           :type 'clution-run
+           :toplevel (clution--system.toplevel system)))
+
     (clution--append-output "Generating script " script-path "\n\n")
 
     (unless (file-exists-p script-dir)
@@ -2592,7 +2589,7 @@ Initializes ASDF and loads the selected system."
   ;;Display sly-mrepl in the repl window
   (clution--display-in-repl-window (sly-mrepl)))
 
-(defun clution--start-sly-repl (clution)
+(defun clution--start-sly-repl (system)
   "Start a sly style repl."
   (when (and clution-intrusive-ui
              (featurep 'sly-mrepl))
@@ -2638,13 +2635,13 @@ Initializes ASDF and loads the selected system."
           (sly-start
            :program (first command)
            :program-args (rest command)
-           :directory (clution--clution.dir clution)
+           :directory (clution--system.startup-dir system)
            :init
-           (lexical-let ((clution clution))
+           (lexical-let ((system system))
              (lambda (port-filename coding-system)
                (format "(progn %s %S)\n\n"
                        (funcall sly-init-function port-filename coding-system)
-                       (clution--repl-form clution)))))))
+                       (clution--repl-form system)))))))
 
     (lexical-let* ((sly-inferior-process (get-buffer-process sly-inferior-buffer))
                    (prev-sentinel (process-sentinel sly-inferior-process))
@@ -2696,7 +2693,7 @@ Initializes ASDF and loads the selected system."
   ;;Show the slime repl in the clution repl window.
   (clution--display-in-repl-window (slime-repl-buffer)))
 
-(defun clution--start-slime-repl (clution)
+(defun clution--start-slime-repl (system)
   "Start a slime style repl."
   ;;Set up advice for switching to the slime repl after connection
   (when (and clution-intrusive-ui
@@ -2744,11 +2741,11 @@ Initializes ASDF and loads the selected system."
                               (slime-start
                                :program (first command)
                                :program-args (rest command)
-                               :directory (clution--clution.dir clution)
+                               :directory (clution--system.startup-dir system)
                                :init (lambda (port-filename coding-system)
                                        (format "(progn %s %S)\n\n"
                                                (slime-init-command port-filename coding-system)
-                                               (clution--repl-form clution))))))
+                                               (clution--repl-form system))))))
             (if clution-intrusive-ui
                 (save-window-excursion
                   (do-start))
@@ -2787,7 +2784,7 @@ Initializes ASDF and loads the selected system."
                clution-show-inferior-start)
       (clution--display-in-repl-window slime-inferior-buffer))))
 
-(defun clution--start-repl (clution)
+(defun clution--start-repl (system)
   "Start a new repl, according to style."
   (clution--append-output
    "\nclution-repl: starting with style '" (format "%s" clution-repl-style) "'\n")
@@ -2798,9 +2795,9 @@ Initializes ASDF and loads the selected system."
 
   (cl-ecase clution-repl-style
     (sly
-     (clution--start-sly-repl clution))
+     (clution--start-sly-repl system))
     (slime
-     (clution--start-slime-repl clution))))
+     (clution--start-slime-repl system))))
 
 (defun clution--restart-repl ()
   "Restart the currently active repl, according to style."
@@ -2811,7 +2808,9 @@ Initializes ASDF and loads the selected system."
         (sly-connection)
         (lambda (proc message)
           (funcall 'sly-quit-sentinel proc message)
-          (clution--start-repl))
+          ;;TODO need to track which system was used to start the repl,
+          ;;in the first place rather than the selected system
+          (clution--start-repl (clution--clution.selected-system)))
         t)))
     (slime
      (when (slime-connected-p)
@@ -2821,7 +2820,7 @@ Initializes ASDF and loads the selected system."
                         (let* ((inferior (slime-inferior-process proc)))
                           (when inferior (delete-process inferior))
                           (slime-net-close proc))
-                        (clution--start-repl))))
+                        (clution--start-repl (clution--clution.selected-system)))))
          (slime-quit-lisp-internal (slime-connection) sentinel t))))))
 
 (defun clution--end-repl ()
@@ -3285,22 +3284,30 @@ generated clution files."
 
 ;;; Functions
 
-(defun clution-repl ()
+(defun clution-repl (system)
   "Activate a repl if there isn't one already active."
-  (interactive)
+  (interactive
+   (list
+    (cond
+     ((not *clution--current-clution*)
+      (error "clution: no clution open"))
+     (t
+      (clution--clution.selected-system)))))
   (cond
-   ((not *clution--current-clution*)
-    (message "clution: no clution open"))
    (*clution--current-op*
     (message "clution: busy doing op: '%s'" (cl-getf *clution--current-op* :type)))
    (*clution--repl-active*
     (message "clution: repl already active"))
    (t
-    (clution--clear-output)
-    (clution--append-output
-     "Starting repl for: '" (clution--clution.name)
-     "'\n\n")
-    (clution--start-repl *clution--current-clution*))))
+    (lexical-let ((system system))
+      (clution-build
+       (list system)
+       (lambda ()
+         (clution--clear-output)
+         (clution--append-output
+          "Starting repl for: '" (clution--system.name system)
+          "'\n\n")
+         (clution--start-repl system)))))))
 
 (defun clution-end-repl ()
   "End the current repl if it's active."
@@ -3330,7 +3337,7 @@ generated clution files."
      "'\n\n")
     (clution--restart-repl))
    (t
-    (clution-repl))))
+    (clution-repl (clution--clution.selected-system)))))
 
 (defun clution-qlfile-sync ()
   "Install & update qlfile packages for the current clution."
@@ -3346,100 +3353,117 @@ generated clution files."
     (clution--clear-output)
     (clution--do-qlfile-sync *clution--current-clution*))))
 
-(defun clution-build ()
+(defun clution-build (systems &optional cont)
   "Perform a 'build' operation on each system in the clution."
-  (interactive)
+  (interactive
+   (list
+    (cond
+     ((not *clution--current-clution*)
+      (error "clution: no clution open"))
+     (t
+      (clution--clution.systems)))
+    nil))
   (cond
-   ((not *clution--current-clution*)
-    (message "clution: no clution open"))
    (*clution--current-op*
     (message "clution: busy doing op: '%s'" (cl-getf *clution--current-op* :type)))
    (*clution--repl-active*
     (clution--clear-output)
-    (clution--kickoff-build-in-repl (clution--clution.systems)))
-   ((and (clution--clution.qlfile-p)
-         (not (file-exists-p (clution--clution.qlfile-libs-dir))))
+    (clution--kickoff-build-in-repl systems))
+   ((null systems)
     (clution--clear-output)
-    ;;Sync qlfile before build
-    (lexical-let ((clution *clution--current-clution*))
-      (clution--do-qlfile-sync
-       clution
-       (lambda ()
-         (clution--do-build (clution--clution.systems clution))))))
+    (clution--append-output
+     "No systems to build"
+     "'\n\n"))
    (t
-    (clution--clear-output)
-    (clution--do-build (clution--clution.systems)))))
+    (lexical-let ((clution (clution--system.clution (first systems))))
+      (cond
+       ((and (clution--clution.qlfile-p clution)
+             (not (file-exists-p (clution--clution.qlfile-libs-dir clution))))
+        ;;Sync qlfile before build
+        (clution--clear-output)
+        (lexical-let ((systems systems)
+                      (cont cont))
+          (clution--do-qlfile-sync
+           clution
+           (lambda ()
+             (clution--do-build systems cont)))))
+       (t
+        (clution--clear-output)
+        (clution--do-build (clution--clution.systems) cont)))))))
 
-(defun clution-run ()
+(defun clution-run (system)
   "Perform a 'run' operation on the currently selected system in the clution"
-  (interactive)
+  (interactive
+   (list
+    (cond
+     ((not *clution--current-clution*)
+      (error "clution: no clution open"))
+     (t
+      (clution--clution.selected-system)))))
   (cond
-   ((not *clution--current-clution*)
-    (message "clution: no clution open"))
    (*clution--current-op*
     (message "clution: busy doing op: '%s'" (cl-getf *clution--current-op* :type)))
    (*clution--repl-active*
     ;;Kill repl and try again
     (clution--end-repl)
-    (clution-run))
-   ((and (clution--clution.qlfile-p)
-         (not (file-exists-p (clution--clution.qlfile-libs-dir))))
-    (clution--clear-output)
-    (lexical-let ((clution *clution--current-clution*))
-      (clution--do-qlfile-sync
-       clution
-       (lambda ()
-         (clution--do-build
-          (list (clution--clution.selected-system clution))
-          (lambda ()
-            (clution--do-run clution)))))))
+    (clution-run system))
    (t
-    (clution--clear-output)
-    (lexical-let ((clution *clution--current-clution*))
-      (clution--do-build
-       (list (clution--clution.selected-system clution))
+    (lexical-let ((system system))
+      (clution-build
+       (list system)
        (lambda ()
-         (clution--do-run clution)))))))
+         (clution--do-run system)))))))
 
-
-(defun clution-publish ()
+(defun clution-publish (system)
   "Perform a 'run' operation on the currently selected system in the clution"
-  (interactive)
+  (interactive
+   (cond
+    ((not *clution--current-clution*)
+     (error "clution: no clution open"))
+    (t
+     (clution--clution.selected-system))))
   (cond
-   ((not *clution--current-clution*)
-    (message "clution: no clution open"))
    (*clution--current-op*
     (message "clution: busy doing op: '%s'" (cl-getf *clution--current-op* :type)))
-   ((and (clution--clution.qlfile-p)
-         (not (file-exists-p (clution--clution.qlfile-libs-dir))))
-    (clution--clear-output)
-    (lexical-let ((clution *clution--current-clution*))
-      (clution--do-qlfile-sync
-       clution
+   (t
+    (lexical-let ((system system))
+      (clution-build
+       (list system)
        (lambda ()
-         (clution--clear-output)
-         (clution--do-publish (clution--clution.selected-system))))))
-   (t
-    (clution--clear-output)
-    (clution--do-publish (clution--clution.selected-system)))))
+         (clution--do-publish system)))))))
 
-(defun clution-clean ()
+(defun clution-clean (systems &optional cont)
   "Perform a 'clean' operation on the current clution."
-  (interactive)
+  (interactive
+   (list
+    (cond
+     ((not *clution--current-clution*)
+      (error "clution: no clution open"))
+     (t
+      (clution--clution.systems)))
+    nil))
   (cond
-   ((not *clution--current-clution*)
-    (message "clution: no clution open"))
    (*clution--current-op*
     (message "clution: busy doing op: '%s'" (cl-getf *clution--current-op* :type)))
-   (t
+   ((null systems)
     (clution--clear-output)
     (clution--append-output
-     "Clean starting: '" (clution--clution.name)
-     "'\n\n")
-    (clution--do-clean (clution--clution.systems))
-    (clution--append-output
-     "Clean complete: '" (clution--clution.name)
-     "'\n"))))
+     "No systems to clean"
+     "'\n\n"))
+   (t
+    (clution--clear-output)
+    (lexical-let ((clution (clution--system.clution (first systems)))
+                  (cont cont))
+      (clution--append-output
+       "Clean starting: '" (clution--clution.name clution)
+       "'\n\n")
+      (clution--do-clean
+       systems
+       (lambda ()
+         (clution--append-output
+          "Clean complete: '" (clution--clution.name clution)
+          "'\n")
+         (when cont (funcall cont))))))))
 
 (defun clution-create-clution (path &optional open)
   "Create a new clution file at `path'"

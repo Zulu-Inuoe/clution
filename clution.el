@@ -8,10 +8,9 @@
 ;;;with this software. If not, see
 ;;;<http://creativecommons.org/publicdomain/zero/1.0/>.
 
-(eval-when-compile (require 'cl-lib))
-(eval-when-compile (require 'cl))
-(eval-when-compile (require 'subr-x))
+(require 'cl-lib)
 (require 'filenotify)
+(require 'subr-x)
 (require 'pp)
 
 (defvar *clution--cl-clution-path*

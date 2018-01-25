@@ -3431,7 +3431,7 @@ generated clution files."
              (clution--do-build systems cont)))))
        (t
         (clution--clear-output)
-        (clution--do-build (clution--clution.systems) cont)))))))
+        (clution--do-build systems cont)))))))
 
 (defun clution-run (system)
   "Perform a 'run' operation on the currently selected system in the clution"
@@ -3540,7 +3540,7 @@ generated clution files."
   (interactive
    (list
     (clution--read-system-type "System type: ")
-    (read-string "System name: ")
+    (string-remove-suffix ".asd" (read-string "System name: "))
     (read-directory-name "System directory: ")
     t))
 

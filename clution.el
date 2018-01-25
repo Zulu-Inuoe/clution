@@ -576,6 +576,12 @@ Returns the window displaying the buffer"
                          (interactive)
                          (clution--select-system system))))
 
+        (define-key-after mouse-menu [repl]
+          `(menu-item "REPL"
+                      ,(lambda ()
+                         (interactive)
+                         (clution-repl system))))
+
         (define-key-after mouse-menu [separator-delete]
           '(menu-item "--"))
 

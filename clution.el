@@ -3310,6 +3310,7 @@ generated clution files."
     (define-key map (kbd "C-S-<f5>") 'clution-maybe-restart-repl)
     map))
 
+;;;###autoload
 (define-minor-mode clution-mode
   "minor mode for editing a clution project."
   nil nil nil
@@ -3323,10 +3324,12 @@ generated clution files."
       (clution-close)
       (remove-hook 'find-file-hook 'clution--find-file-hook)))))
 
+;;;###autoload
 (define-derived-mode clution-file-mode lisp-mode
   "clution-file"
   "Major mode for editing a clution project file.")
 
+;;;###autoload
 (define-derived-mode cuo-file-mode lisp-mode
   "cuo-file"
   "Major mode for editing a clution user options file")
@@ -3337,6 +3340,7 @@ generated clution files."
     (define-key map (kbd "Q") 'clution-close)
     map))
 
+;;;###autoload
 (define-derived-mode clution-output-mode compilation-mode
   "clution-output"
   "Mode for the clution output buffer"
@@ -3351,6 +3355,7 @@ generated clution files."
     (define-key map (kbd "N") 'clution-create-system)
     map))
 
+;;;###autoload
 (define-derived-mode clutex-mode special-mode "ClutexMode"
   "A major mode for displaying the directory tree in a clution."
   (setq indent-tabs-mode nil
@@ -3359,6 +3364,7 @@ generated clution files."
 
 ;;; Functions
 
+;;;###autoload
 (defun clution-repl (system)
   "Activate a repl if there isn't one already active."
   (interactive
@@ -3384,6 +3390,7 @@ generated clution files."
           "'\n\n")
          (clution--start-repl system)))))))
 
+;;;###autoload
 (defun clution-end-repl ()
   "End the current repl if it's active."
   (interactive)
@@ -3397,6 +3404,7 @@ generated clution files."
    (t
     (message "clution: no repl active"))))
 
+;;;###autoload
 (defun clution-maybe-restart-repl ()
   "Restart the repl if it's already active, or start a new one if it isn't."
   (interactive)
@@ -3414,6 +3422,7 @@ generated clution files."
    (t
     (clution-repl (clution--clution.selected-system)))))
 
+;;;###autoload
 (defun clution-qlfile-sync ()
   "Install & update qlfile packages for the current clution."
   (interactive)
@@ -3428,6 +3437,7 @@ generated clution files."
     (clution--clear-output)
     (clution--do-qlfile-sync *clution--current-clution*))))
 
+;;;###autoload
 (defun clution-build (systems &optional cont)
   "Perform a 'build' operation on each system in the clution."
   (interactive
@@ -3466,6 +3476,7 @@ generated clution files."
         (clution--clear-output)
         (clution--do-build systems cont)))))))
 
+;;;###autoload
 (defun clution-run (system)
   "Perform a 'run' operation on the currently selected system in the clution"
   (interactive
@@ -3489,6 +3500,7 @@ generated clution files."
        (lambda ()
          (clution--do-run system)))))))
 
+;;;###autoload
 (defun clution-publish (system)
   "Perform a 'run' operation on the currently selected system in the clution"
   (interactive
@@ -3508,6 +3520,7 @@ generated clution files."
        (lambda ()
          (clution--do-publish system)))))))
 
+;;;###autoload
 (defun clution-clean (systems &optional cont)
   "Perform a 'clean' operation on the current clution."
   (interactive
@@ -3541,6 +3554,7 @@ generated clution files."
           "'\n")
          (when cont (funcall cont))))))))
 
+;;;###autoload
 (defun clution-create-clution (path &optional open)
   "Create a new clution file at `path'"
   (interactive
@@ -3569,6 +3583,7 @@ generated clution files."
 
 (defvar clution--system-type-history nil)
 
+;;;###autoload
 (defun clution-create-system (type name dir &optional open)
   "Create a new clution file at `path'"
   (interactive
@@ -3596,6 +3611,7 @@ generated clution files."
         (clution-open-asd path type)))
       (select-window (clution--clutex-open-file path)))))
 
+;;;###autoload
 (defun clution-add-system (clution path type)
   (interactive
    (list *clution--current-clution*
@@ -3611,6 +3627,7 @@ generated clution files."
       (setf type (clution--read-system-type "System type: ")))
     (clution--add-system clution path type))))
 
+;;;###autoload
 (defun clution-set-qlfile (path)
   (interactive
    (list nil))
@@ -3626,6 +3643,7 @@ generated clution files."
                        (y-or-n-p (format "clution already has qlfile (%s), replace?" (clution--clution.qlfile-path))))))
       (clution--clution.set-qlfile-path path)))))
 
+;;;###autoload
 (defun clution-open (path)
   "Opens `path' and sets it as the current clution."
   (interactive
@@ -3656,6 +3674,7 @@ generated clution files."
 
   (run-hooks 'clution-open-hook))
 
+;;;###autoload
 (defun clution-open-asd (path type)
   "Opens `path' and sets it as the current clution."
   (interactive
@@ -3683,6 +3702,7 @@ generated clution files."
         (clution--save-clution clution)))
     (clution-open asd-clution-path)))
 
+;;;###autoload
 (defun clution-close ()
   "Close the currently open clution, ending a repl if it is active."
   (interactive)
@@ -3724,6 +3744,7 @@ The root window is the root window of the selected frame.
 _ALIST is ignored."
   (display-buffer-in-side-window buffer '((side . bottom) (slot . -1))))
 
+;;;###autoload
 (defun clution-open-output ()
   "Opens the clution output window."
   (interactive)
@@ -3734,6 +3755,7 @@ _ALIST is ignored."
             (display-buffer buffer '(clution-output-default-display-fn))))
     (clution--init-output-window *clution--output-window*)))
 
+;;;###autoload
 (defun clution-close-output ()
   "Closes the clution output window."
   (interactive)
@@ -3751,6 +3773,7 @@ _ALIST is ignored."
   (let ((window-pos (if (eq clution-clutex-position 'right) 'right 'left)))
     (display-buffer-in-side-window buffer `((side . ,window-pos)))))
 
+;;;###autoload
 (defun clution-open-clutex ()
   (interactive)
   (unless (window-live-p *clution--clutex-window*)
@@ -3760,6 +3783,7 @@ _ALIST is ignored."
             (display-buffer buffer '(clution-clutex-default-display-fn))))
     (clution--init-clutex-window *clution--clutex-window*)))
 
+;;;###autoload
 (defun clution-close-clutex ()
   (interactive)
   (when (window-live-p *clution--clutex-window*)

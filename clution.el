@@ -3492,11 +3492,12 @@ generated clution files."
 (defun clution-publish (system)
   "Perform a 'run' operation on the currently selected system in the clution"
   (interactive
-   (cond
-    ((not *clution--current-clution*)
-     (error "clution: no clution open"))
-    (t
-     (clution--clution.selected-system))))
+   (list
+    (cond
+     ((not *clution--current-clution*)
+      (error "clution: no clution open"))
+     (t
+      (clution--clution.selected-system)))))
   (cond
    (*clution--current-op*
     (message "clution: busy doing op: '%s'" (cl-getf *clution--current-op* :type)))

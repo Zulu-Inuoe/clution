@@ -1,0 +1,9 @@
+(defpackage #:ros/script/script-launcher
+  (:use #:cl))
+(in-package #:ros/script/script-launcher)
+
+(defun main (&rest argv)
+  ;;Pretend that the command-line was passed in..
+  (setf uiop:*command-line-arguments* (rest argv))
+  ;;Load the actual script
+  (load (first argv)))

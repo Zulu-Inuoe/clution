@@ -64,8 +64,7 @@
 (handler-case
     (let
         ((ret-code
-          (apply #'cl-clution::main
-                 (uiop:raw-command-line-arguments))))
+          (apply #'cl-clution::main uiop:*command-line-arguments*)))
       (if
           (integerp ret-code)
           (uiop:quit ret-code cl:t)

@@ -34,6 +34,11 @@
    (file-name-directory (file-truename load-file-name)))
   "Path to the 'cl-clution' script.")
 
+(defvar *clution--ros-script-launcher-path*
+  (expand-file-name
+   "script-launcher.ros"
+   (file-name-directory (file-truename load-file-name))))
+
 (defvar *clution--cl-clution-proc* nil
   "A background lisp process to perform operations.")
 (defvar *clution--cl-clution-output* "")
@@ -1783,19 +1788,34 @@ Returns the window displaying the buffer"
 
 (defun clution--spawn-script-command ()
   "Command to spawn a lisp which will load a script file, then exit."
-  (cl-ecase clution-backend
-    (sbcl (clution--sbcl-command))
-    (ccl (clution--ccl-command))))
+  (cl-ecase clution-frontend
+    (raw
+     (cl-ecase clution-backend
+       (sbcl (clution--sbcl-command))
+       (ccl (clution--ccl-command))))
+    (roswell
+     (append
+      (clution--ros-command)
+      (cl-ecase clution-backend
+        (sbcl
+         '("--lisp" "sbcl-bin"))
+        (ccl
+         '("--lisp" "ccl-bin")))
+      `("--" ,*clution--ros-script-launcher-path*)))))
 
 (defun clution--spawn-script-args (path)
   "Arguments to spawn a lisp which will load a script file, then exit."
-  (cl-ecase clution-backend
-    (sbcl
-     `("--noinform" "--disable-ldb" "--lose-on-corruption" "--end-runtime-options"
-       "--noprint" "--disable-debugger" "--load" ,path "--eval" "(sb-ext:exit :code 0)"
-       "--end-toplevel-options"))
-    (ccl
-     `("--batch" "--quiet" "--load" ,path "--eval" "(ccl:quit 0)" "--"))))
+  (cl-ecase clution-frontend
+    (raw
+     (cl-ecase clution-backend
+       (sbcl
+        `("--noinform" "--disable-ldb" "--lose-on-corruption" "--end-runtime-options"
+          "--noprint" "--disable-debugger" "--load" ,path "--eval" "(sb-ext:exit :code 0)"
+          "--end-toplevel-options"))
+       (ccl
+        `("--batch" "--quiet" "--load" ,path "--eval" "(ccl:quit 0)" "--"))))
+    (roswell
+     (list path))))
 
 (defun clution--spawn-repl-command ()
   "Command to spawn a lisp in a REPL."
@@ -1823,7 +1843,7 @@ Returns the window displaying the buffer"
 of command-line arguments"
   (cl-ecase clution-backend
     (t
-     '(uiop:raw-command-line-arguments))))
+     'uiop:*command-line-arguments*)))
 
 (defun clution--exit-form (exit-code-form)
   "A SEXP which when evaluated in the lisp backend, will exit the program with

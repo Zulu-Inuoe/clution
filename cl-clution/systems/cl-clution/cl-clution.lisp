@@ -83,11 +83,11 @@
     t))
 
 (defun main (&rest args)
-  (unless (= (length args) 2)
+  (unless (= (length args) 1)
     (format t "Invalid arguments~%")
     (return-from main -1))
 
-  (let ((terminator (second args))
+  (let ((terminator (first args))
         (eof-value (gensym)))
     ;;rebind all the IO
     (let* ((clution-input *standard-input*)

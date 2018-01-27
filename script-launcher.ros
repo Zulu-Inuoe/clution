@@ -2,6 +2,10 @@
   (:use #:cl))
 (in-package #:ros/script/script-launcher)
 
+(unless (find-package :uiop)
+  (ros:quicklisp)
+  (funcall (find-symbol #.(string :quickload) :ql) :uiop :silent t))
+
 (defun main (&rest argv)
   ;;Pretend that the command-line was passed in..
   (setf uiop:*command-line-arguments* (rest argv))

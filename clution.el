@@ -1796,6 +1796,7 @@ Returns the window displaying the buffer"
     (roswell
      (append
       (clution--ros-command)
+      '("+Q")
       (cl-ecase clution-backend
         (sbcl
          '("--lisp" "sbcl-bin"))

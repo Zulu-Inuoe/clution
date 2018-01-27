@@ -1,4 +1,4 @@
-;;; clution.el -- Common Lisp IDE
+;;; clution.el --- Common Lisp IDE
 
 ;; Copyright (C) 2018
 

@@ -1,12 +1,27 @@
-;;;clution - Emacs package for a Common Lisp IDE
-;;;Written in 2018 by Wilfredo Velázquez-Rodríguez <zulu.inuoe@gmail.com>
-;;;
-;;;To the extent possible under law, the author(s) have dedicated all copyright
-;;;and related and neighboring rights to this software to the public domain
-;;;worldwide. This software is distributed without any warranty.
-;;;You should have received a copy of the CC0 Public Domain Dedication along
-;;;with this software. If not, see
-;;;<http://creativecommons.org/publicdomain/zero/1.0/>.
+;;; clution.el -- Common Lisp IDE
+
+;; Copyright (C) 2018
+
+;; Author: Wilfredo Velázquez-Rodríguez <zulu.inuoe@gmail.com>
+;; Maintainer: Wilfredo Velázquez-Rodríguez <zulu.inuoe@gmail.com>
+;; Created: 01 Jan 2018
+;; Version: 0.1.0
+;; Keywords: languages
+;; Homepage: https://github.com/Zulu-Inuoe/clution
+;; Package-Requires: ((emacs "25"))
+;; License: CC0
+;;    To the extent possible under law, the author(s) have dedicated all copyright
+;;    and related and neighboring rights to this software to the public domain
+;;    worldwide. This software is distributed without any warranty.
+;;    You should have received a copy of the CC0 Public Domain Dedication along
+;;    with this software. If not, see
+;;    <http://creativecommons.org/publicdomain/zero/1.0/>.
+
+;;; Commentary:
+;; clution.el is an IDE package for Common Lisp development, which provides front-ends
+;; to a variety of tools for developing Common Lisp projects.
+
+;;; Code:
 
 (require 'cl-lib)
 (require 'filenotify)
@@ -3736,3 +3751,4 @@ _ALIST is ignored."
 (add-to-list 'auto-mode-alist '("\\.cuo$" . cuo-file-mode))
 
 (provide 'clution)
+;;; clution.el ends here

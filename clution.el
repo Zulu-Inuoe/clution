@@ -2497,16 +2497,18 @@ Initializes ASDF and loads the selected system."
          (system-names (mapcar 'clution--system.name systems)))
     (sly-eval-async
         `(cl:progn
-          (slynk::collect-notes
-           (cl:lambda ()
-                      (cl:dolist (system-name ',system-names)
-                                 (cl:handler-case
-                                  (slynk::with-compilation-hooks ()
-                                                                 (asdf:compile-system system-name :force t))
-                                  (asdf:compile-error ()
-                                                      nil)
-                                  (asdf/lisp-build:compile-file-error ()
-                                                                      nil))))))
+          (slynk::with-buffer-syntax
+           ()
+           (slynk::collect-notes
+            (cl:lambda (cl:&aux (success cl:t))
+                       (cl:dolist (system-name ',system-names success)
+                                  (cl:handler-case
+                                   (slynk::with-compilation-hooks ()
+                                                                  (asdf:compile-system system-name :force cl:nil))
+                                   (asdf:compile-error ()
+                                                       (cl:setf success cl:nil))
+                                   (asdf/lisp-build:compile-file-error ()
+                                                                       (cl:setf success cl:nil))))))))
       (lexical-let ((clution clution))
         (lambda (result)
           (let ((default-directory (clution--clution.dir clution)))

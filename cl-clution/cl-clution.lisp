@@ -19,7 +19,7 @@
         (let
             ((qlfile-libs-paths
               (directory
-               (merge-pathnames "qlfile-libs/**/*.asd" *load-truename*))))
+               (uiop:merge-pathnames* "qlfile-libs/**/*.asd" *load-truename*))))
           (flet
               ((clution-qlfile-libs-searcher
                 (system-name)
@@ -35,7 +35,7 @@
                  (p)
                  (cons
                   (car p)
-                  (merge-pathnames
+                  (uiop:merge-pathnames*
                    (cdr p)
                    *load-truename*)))
                '(("cl-clution" . "systems/cl-clution/cl-clution.asd")))))

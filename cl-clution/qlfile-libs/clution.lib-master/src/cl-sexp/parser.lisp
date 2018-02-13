@@ -36,6 +36,10 @@
     :initform (error "sexp-opaque-node: must supply text")
     :reader opaque-node-text)))
 
+(defmethod print-object ((object sexp-opaque-node) stream)
+  (print-unreadable-object (object stream :type t)
+    (format stream "~S" (opaque-node-text object))))
+
 (defun %opaque-node-p (node)
   (typep node 'sexp-opaque-node))
 
@@ -92,11 +96,52 @@
   (efirst (skip (vchildren sexp-list) n)))
 
 (defun sexp-list-getf (sexp-list prop-name &optional (prop-package :keyword))
-  (efirst (skip (skip-until (vchildren sexp-list)
-                            (lambda (node)
-                              (and (typep node 'sexp-symbol-node)
-                                   (sexp-symbol-match node prop-name prop-package))))
-                1)))
+  (-> (vchildren sexp-list)
+      (skip-until (lambda (node)
+                    (and (typep node 'sexp-symbol-node)
+                         (sexp-symbol-match node prop-name prop-package))))
+      (skip 1)
+      (efirst)))
+
+(defun %append-to-list-node (list-node new-node &optional (indent-offset 1)
+                             &aux
+                               (indent (+ (%node-indention-level list-node)
+                                          indent-offset)))
+  ;;Set the parent
+  (setf (sexp-node-parent new-node) list-node)
+
+  ;;Find the last non-whitespace child
+  (let ((last-child (elast* (children list-node) (complement #'%whitespace-node-p))))
+    (cond
+      (last-child
+       (let* ((cell (member last-child (children list-node))))
+         (setf (cdr cell)
+               (list
+                (%make-indent-node indent (%opaque-node-ends-with-newline last-child) list-node)
+                new-node))))
+      (t
+       ;;We are the first non-whitespace child
+       (setf (children list-node) (list new-node))))))
+
+(defun %delete-from-list-node (list-node node)
+  (let* ((cell (member node (children list-node))))
+    ;;Delete any white space that follows it
+    (loop :while (and (cdr cell) (%whitespace-node-p (cadr cell)))
+          :do (setf (cdr cell) (cddr cell)))
+
+    ;;If it's the last node in the parent, remove whitespace before it, too
+    (when (null (cdr cell))
+      (loop
+        :for prev-cell := (%cell-before node (children list-node))
+        :while (and prev-cell (%whitespace-node-p (car prev-cell)))
+        :do (setf (children list-node) (delete (car prev-cell) (children list-node)))))
+
+    ;;Delete it
+    (setf (children list-node) (delete node (children list-node)))
+
+    ;;If there is only whitespace left, then clear out all children
+    (when (all (children list-node) #'%whitespace-node-p)
+      (setf (children list-node) nil))))
 
 (defclass sexp-vector-node (sexp-parent-node)
   ())
@@ -271,3 +316,39 @@
     :for node := (%read-sexp-node enumerator)
     :while node
     :do (yield node)))
+
+(defun %node-indention-level (node
+                              &aux
+                                (parent (sexp-node-parent node)))
+  (cond
+    ((null parent)
+     0)
+    ((eq (first (children parent)) node)
+     (1+ (%node-indention-level parent)))
+    (t
+     (loop
+       :for prev-cell := (%cell-before node (children parent))
+         :then (%cell-before prev-node (children parent))
+       :for prev-node := (car prev-cell)
+       :while (%whitespace-node-p prev-node)
+       :sum (-> (opaque-node-text prev-node)
+                (reverse)
+                (take-while  (lambda (c) (char= c #\Space)))
+                (ecount))))))
+
+(defun %make-indent-node (indent skip-newline-p &optional parent)
+  (let ((prefix-whitespace
+          (with-output-to-string (res)
+            (unless skip-newline-p
+              (do-enumerable (c (%eol-sequence))
+                (format res "~C" c)))
+            (format res "~A" (make-string indent :initial-element #\Space)))))
+    (make-instance 'sexp-whitespace-node
+                   :parent parent
+                   :text prefix-whitespace)))
+
+(defun %opaque-node-ends-with-newline (node)
+  (and (%opaque-node-p node)
+       (-> *%eol-sequences*
+           (select #'cdr)
+           (any* (lambda (eol-seq) (ends-with-subseq eol-seq (opaque-node-text node)))))))

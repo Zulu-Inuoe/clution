@@ -1,17 +1,58 @@
 (in-package #:cl-clution)
 
-(defvar *active-asd-files* ())
+(defun clu-plist (clu-path)
+  (when-let* ((clu (read-clu-file clu-path)))
+    (clu-file-plist clu)))
 
-(defun get-asd-from-path (path)
-  (cdr (assoc (truename path) *active-asd-files* :test #'uiop:pathname-equal)))
-
-(defun set-active-asd-files (&rest paths)
-  (setf *active-asd-files*
-        (mapcar (lambda (p)
-                  (let ((truename (truename p)))
-                    (cons truename (read-asd-file truename))))
-                paths))
+(defun create-clu (clu-path)
+  (let ((clu (make-instance 'clu-file :path clu-path)))
+    (ensure-directories-exist clu-path)
+    (with-output-to-file (stream clu-path :if-exists :supersede :external-format :utf-8)
+      (write-clu-file clu stream)))
   t)
+
+(defun add-clu-dir (clu-path item-path dir-name)
+  (when-let* ((clu (read-clu-file clu-path)))
+    (clu-file-add-dir clu item-path dir-name)
+    (with-output-to-file (stream clu-path :if-exists :supersede :external-format :utf-8)
+      (write-clu-file clu stream))
+    t))
+
+(defun remove-clu-dir (clu-path item-path)
+  (when-let* ((clu (read-clu-file clu-path)))
+    (clu-file-remove-dir clu item-path)
+    (with-output-to-file (stream clu-path :if-exists :supersede :external-format :utf-8)
+      (write-clu-file clu stream))
+    t))
+
+(defun add-clu-system (clu-path item-path system-path system-type)
+  (when-let* ((clu (read-clu-file clu-path)))
+    (clu-file-add-system clu item-path system-path system-type)
+    (with-output-to-file (stream clu-path :if-exists :supersede :external-format :utf-8)
+      (write-clu-file clu stream))
+    t))
+
+(defun remove-clu-system (clu-path item-path system-path)
+  (when-let* ((clu (read-clu-file clu-path)))
+    (clu-file-remove-system clu item-path system-path)
+    (with-output-to-file (stream clu-path :if-exists :supersede :external-format :utf-8)
+      (write-clu-file clu stream))
+    t))
+
+(defun has-clu-qlfiles (clu-path)
+  (when-let* ((clu (read-clu-file clu-path)))
+    (and (clu-has-qlfiles clu)
+         t)))
+
+(defun are-clu-qlfile-libs-up-to-date (clu-path)
+  (when-let* ((clu (read-clu-file clu-path)))
+    (and (clu-qlfile-libs-up-to-date clu)
+         t)))
+
+(defun sync-clu-qlfiles (clu-path)
+  (when-let* ((clu (read-clu-file clu-path)))
+    (clu-sync-qlfiles clu)
+    t))
 
 (defun asd-plists (asd-path)
   "Gets the plist of the first system found in `asd-path'"
@@ -29,6 +70,14 @@
 (defun add-module-component (asd-path component-path component-name)
   (when-let* ((asd (read-asd-file asd-path)))
     (asd-file-add-module-component asd component-path component-name)
+    ;;Spit out the new system file
+    (with-output-to-file (stream asd-path :if-exists :supersede :external-format :utf-8)
+      (write-asd-file asd stream))
+    t))
+
+(defun add-static-file-component (asd-path component-path component-name)
+  (when-let* ((asd (read-asd-file asd-path)))
+    (asd-file-add-static-file-component asd component-path component-name)
     ;;Spit out the new system file
     (with-output-to-file (stream asd-path :if-exists :supersede :external-format :utf-8)
       (write-asd-file asd stream))
@@ -98,8 +147,7 @@
            (*trace-output* *standard-output*)
            (*debug-io* (make-two-way-stream *standard-input*  *standard-output*))
            (*query-io* *debug-io*)
-           (*package* (find-package "CL-CLUTION"))
-           (*print-case* :downcase))
+           (*package* (find-package "CL-CLUTION")))
       ;;Start the repl
       (let (form result)
         (loop
@@ -118,7 +166,8 @@
                 (setf result (cons :fail (princ-to-string err)))))
 
             ;;Print the result
-            (print result clution-output)
+            (let ((*print-case* :downcase))
+              (print result clution-output))
 
             ;;Write the terminator
             (write-string terminator clution-output)

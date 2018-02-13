@@ -8,37 +8,39 @@
 ;;;with this software. If not, see
 ;;;<http://creativecommons.org/publicdomain/zero/1.0/>.
 
-(defpackage #:%clution.lib
+(defpackage #:clution.lib.clu
   (:use
+   #:%clution.lib
    #:alexandria
    #:cl
    #:cl-arrows
+   #:clution.lib.cl-sexp
    #:enumerable
    #:parse-float)
   (:export
-   ;;;util
-   #:%eol-style
-   #:*%eol-style*
-   #:*%eol-sequences*
-   #:%eol-sequence
+   ;;;clu
+   #:clu-file-item
 
-   #:%whitespacep
-   #:%terminating-p
-   #:%cell-before
-   #:%cell-after
-   #:%item-before
-   #:%item-after
-   #:%guess-eol-style
-   #:%read-from-file
-   #:%pathname-equal
-   #:%pathname-as-directory
-   #:%expand-pathname
-   #:%relative-pathname
-   #:%directory-pathname
-   #:%directory-name
-   #:%ensure-relative-pathname
-   #:%path-combine
-   #:%copy-directory
-   #:%app-data-dir
-   #:%app-config-dir
-   #:%app-temp-dir))
+   #:clu-file-dir-item
+   #:clu-file-dir-item-items
+   #:clu-file-dir-item-systems
+
+   #:clu-file-system-item
+   #:clu-file-system-item-path
+
+   #:clu-file
+   #:clu-file-path
+   #:clu-file-dir
+   #:clu-file-clu-dir
+   #:clu-file-qlfile-fetch-dir
+   #:clu-file-qlfile-libs-dir
+   #:clu-file-items
+   #:clu-file-systems
+   #:read-clu-file
+   #:write-clu-file
+
+   #:clu-file-add-dir
+   #:clu-file-remove-dir
+   #:clu-file-add-system
+   #:clu-file-remove-system
+   #:clu-file-plist))

@@ -37,6 +37,8 @@
 
    #:sexp-list-nth
    #:sexp-list-getf
+   #:%append-to-list-node
+   #:%delete-from-list-node
 
    #:sexp-vector-node
 
@@ -54,4 +56,7 @@
 
 
    #:%parse-sexp-file
-   #:%write-node))
+   #:%write-node
+   #:%node-indention-level
+   #:%make-indent-node
+   #:%opaque-node-ends-with-newline))

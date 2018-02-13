@@ -1,6 +1,8 @@
 ql alexandria :latest
 ql cl-arrows :latest
 ql cl-cont :latest
+ql closer-mop :latest
+github clution.lib Zulu-Inuoe/clution.lib
 github enumerable Zulu-Inuoe/enumerable
 ql parse-float :latest
 github trivial-cltl2 Zulu-Inuoe/trivial-cltl2

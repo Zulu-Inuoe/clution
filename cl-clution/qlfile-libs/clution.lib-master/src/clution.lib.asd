@@ -26,9 +26,23 @@
     :components
     ((:file "package")
      (:file "asd")))
-   (:file "package"))
+   (:module "clu"
+    :components
+    ((:file "package")
+     (:file "clu")))
+   (:file "package")
+   (:file "clution"))
   :depends-on
   (#:alexandria
    #:cl-arrows
    #:enumerable
-   #:parse-float))
+   #:parse-float
+   #:qlot
+   #:qlot/install
+   #:qlot/source
+   #:qlot/source/git
+   #:qlot/source/github
+   #:qlot/source/http
+   #:qlot/source/ql
+   #:qlot/parser
+   #:trivial-features))

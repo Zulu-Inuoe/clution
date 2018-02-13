@@ -11,9 +11,14 @@
 (defpackage #:clution.lib
   (:use
    #:%clution.lib
+   #:clution.lib.asd
+   #:clution.lib.clu
    #:alexandria
    #:cl
    #:cl-arrows
    #:enumerable
    #:parse-float)
-  (:export))
+  (:export
+   #:clu-has-qlfiles
+   #:clu-qlfile-libs-up-to-date
+   #:clu-sync-qlfiles))

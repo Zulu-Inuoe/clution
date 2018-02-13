@@ -130,15 +130,15 @@ Arguments accepted:
        :sentinel
        (lexical-let ((cont cont))
          (lambda (proc event)
-           (cl-case (process-status proc)
-             ((exit closed failed)
+           (cl-ecase (process-status proc)
+             ((stop exit signal closed failed)
               (when cont
                 (funcall cont (process-exit-status proc))))
-             (t))))))))
+             ((run open connect listen)))))))))
 
 (defun clution--translate-system-plist (system system-plist)
   (cl-labels ((translate-component-plist (system parent component-plist)
-                                         (let* ((component-node
+                                         (let* ((component
                                                  (list
                                                   :system system
                                                   :parent parent
@@ -147,14 +147,14 @@ Arguments accepted:
                                                   :path (file-truename (cl-getf component-plist :pathname))
                                                   :children nil
                                                   :depends-on (cl-getf component-plist :depends-on))))
-                                           (setf (cl-getf component-node :children)
+                                           (setf (cl-getf component :children)
                                                  (cl-mapcar
-                                                  (lexical-let ((component-node component-node)
+                                                  (lexical-let ((component component)
                                                                 (system system))
                                                     (lambda (c)
-                                                      (translate-component-plist system component-node c)))
+                                                      (translate-component-plist system component c)))
                                                   (cl-getf component-plist :components)))
-                                           component-node)))
+                                           component)))
     (translate-component-plist system nil system-plist)))
 
 (defun clution--system-query (system)
@@ -178,14 +178,56 @@ Arguments accepted:
     (file-notify-rm-watch (cdr cell))
     (setf *clution--system-watches* (cl-delete cell *clution--system-watches*))))
 
-(defun clution--add-system (clution path type)
-  "Adds the system at `path' to the given `clution'"
-  (let ((system (clution--make-system
-                 (list :path path :type type))))
-    (clution--clution.add-system clution system)
-    ;;Add file watch for the new system
-    (clution--watch-system system))
-  (clution--save-clution clution))
+(defun clution--add-directory (clution parent-dir)
+  (let ((clu-path (clution--clution.path clution))
+        (parent-id (if (null parent-dir) nil (clution--item.id parent-dir)))
+        (name (read-string "Directory name: ")))
+    (when parent-dir
+      ;;Ensure the directory is unfolded in clutex
+      (clution--item.set-folded parent-dir nil))
+    (clution--cl-clution-eval
+     `(add-clu-dir ',clu-path ',parent-id ',name))))
+
+(defun clution--remove-directory (dir)
+  (let* ((clution (clution--item.clution dir))
+         (clu-path (clution--clution.path clution))
+         (id (clution--item.id dir)))
+    (when (y-or-n-p (format "confirm: Remove directory '%s'?" (clution--dir.name dir)))
+      (clution--cl-clution-eval
+       `(remove-clu-dir ',clu-path ',id)))))
+
+(defun clution--add-system (clution parent-dir &optional path type)
+  (let ((clu-path (clution--clution.path clution))
+        (parent-id (if (null parent-dir) nil (clution--item.id parent-dir)))
+        (path (or path (clution--read-file-name "System path: " nil nil t)))
+        (type (or type (clution--read-system-type "System type: "))))
+    (when parent-dir
+      ;;Ensure the directory is unfolded in clutex
+      (clution--item.set-folded parent-dir nil))
+    (clution--cl-clution-eval
+     `(add-clu-system ',clu-path ',parent-id ',path ',type))))
+
+(defun clution--create-system (clution parent-dir)
+  (let ((name (string-remove-suffix ".asd" (read-string "System name: ")))
+        (dir (read-directory-name "System directory: "))
+        (type (clution--read-system-type "System type: ")))
+    (let ((path (expand-file-name (concat name ".asd") dir)))
+      (when (file-exists-p path)
+        (error "clution: system already exists at '%s'" path))
+      (if-let ((template-fn (cdr (assoc type clution-system-template-alist))))
+          (progn
+            (unless (file-exists-p dir)
+              (make-directory dir t))
+            (funcall template-fn path))
+        (error "clution: no template vailable for '%s'" type))
+      (cond
+       (clution
+        (clution--add-system clution parent-dir path type)
+        (when parent-dir
+          (clution--item.set-folded parent-dir nil)))
+       (t
+        (clution-open-asd path type)))
+      (select-window (clution--clutex-open-file path)))))
 
 (defun clution--select-system (system)
   "Selects the given `system' in the clution.
@@ -197,25 +239,25 @@ See `clution--clution.selected-system'"
   (clution--refresh-clutex))
 
 (defun clution--remove-system (system)
-  "Remove `system' from its clution.
-When `delete' is non-nil, delete that system from disk."
-  (let ((clution (clution--system.clution system)))
-    (unless clution
-      (error "clution: system has no parent clution"))
-    (when (y-or-n-p (format "confirm: Remove system '%s'" (clution--system.name system)))
-      (clution--clution.remove-system clution system)
-      (clution--unwatch-system system)
-      (clution--save-clution clution))))
+  "Remove `system' from its clution."
+  (when (y-or-n-p (format "confirm: Remove system '%s'?" (clution--system.name system)))
+    (let* ((clution (clution--system.clution system))
+           (clu-path (clution--clution.path clution))
+           (parent-id (butlast (clution--item.id system)))
+           (system-path (clution--system.path system)))
+      (clution--cl-clution-eval
+       `(remove-clu-system
+         ',clu-path
+         ;;TODO temp workaround
+         ',parent-id
+         ',system-path)))))
 
-(defun clution--add-system-file (node)
-  (let* ((system (clution--node.system node))
+(defun clution--add-system-file (component)
+  (let* ((system (clution--component.system component))
          (system-path (clution--system.path system))
-         (dir (clution--node.path node))
-         (node-id (clution--node.node-id node))
+         (dir (clution--component.path component))
+         (id (cdr (clution--component.id component)))
          (file (clution--read-file-name "file to add: " dir nil t)))
-    (unless (string-equal (file-name-extension file) "lisp")
-      (error "file is not a lisp file: '%s'" file))
-
     ;;Make sure module dir exists
     (unless (file-exists-p dir)
       (make-directory dir t))
@@ -232,14 +274,26 @@ When `delete' is non-nil, delete that system from disk."
         (copy-file file new-name t t))
        (t ;;do nothing. leave original file.
         ))
-      (clution--cl-clution-eval
-       `(add-file-component ',system-path ',node-id ',(file-name-base file))))))
 
-(defun clution--create-system-file (node)
-  (let* ((system (clution--node.system node))
+      ;;Ensure the module is unfolded in clutex
+      (clution--component.set-folded component nil)
+
+      ;;If it's a lisp file, add it as a :file, otherwise a :static-file
+      (let ((ext (file-name-extension file)))
+        (cond
+         ((string= ext "lisp")
+          (setf new-name (string-remove-suffix ".lisp" new-name))
+          (clution--cl-clution-eval
+           `(add-file-component ',system-path ',id ',new-name)))
+         (t
+          (clution--cl-clution-eval
+           `(add-static-file-component ',system-path ',id ',new-name))))))))
+
+(defun clution--create-system-file (component)
+  (let* ((system (clution--component.system component))
          (system-path (clution--system.path system))
-         (dir (clution--node.path node))
-         (node-id (clution--node.node-id node))
+         (dir (clution--component.path component))
+         (id (cdr (clution--component.id component)))
          (file (string-remove-suffix ".lisp" (read-string "new file name: "))))
 
     ;;Make sure module dir exists
@@ -256,95 +310,113 @@ When `delete' is non-nil, delete that system from disk."
            (format "(in-package #:%s)\n" (clution--system.name system)))
           (write-region nil nil file-name nil nil nil t)))
 
-      (clution--cl-clution-eval
-       `(add-file-component ',system-path ',node-id ',file)))))
+      ;;Ensure the module is unfolded in clutex
+      (clution--component.set-folded component nil)
 
-(defun clution--create-system-module (node)
-  (let* ((system (clution--node.system node))
+      (clution--cl-clution-eval
+       `(add-file-component ',system-path ',id ',file)))))
+
+(defun clution--create-system-module (component)
+  (let* ((system (clution--component.system component))
          (system-path (clution--system.path system))
-         (dir (clution--node.path node))
-         (node-id (clution--node.node-id node))
-         (module (read-string "new module name: ")))
+         (dir (clution--component.path component))
+         (id (cdr (clution--component.id component)))
+         (module (expand-file-name (read-directory-name "new module name: " dir))))
 
     ;;Create the directory if it does not exist
-    (let ((dir-name (file-name-as-directory (expand-file-name module dir))))
-      (unless (file-exists-p dir-name)
-        (make-directory dir-name t)))
+    (unless (file-exists-p module)
+      (make-directory dir-name t))
+
+    ;;Ensure the module is unfolded in clutex
+    (clution--component.set-folded component nil)
 
     (clution--cl-clution-eval
-     `(add-module-component ',system-path ',node-id ',module))))
+     `(add-module-component ',system-path ',id ',module))))
 
-(defun clution--move-system-item-up (node)
-  (clution--cl-clution-eval `(move-component-up ',(clution--system.path (clution--node.system node)) ',(clution--node.node-id node))))
-
-(defun clution--move-system-item-down (node)
-  (clution--cl-clution-eval `(move-component-down ',(clution--system.path (clution--node.system node)) ',(clution--node.node-id node))))
-
-(defun clution--rename-system-item (node)
-  (let* ((system (clution--node.system node))
+(defun clution--move-component-up (component)
+  (let* ((system (clution--component.system component))
          (system-path (clution--system.path system))
-         (parent (clution--node.parent node))
-         (parent-dir (file-name-as-directory (clution--node.path parent)))
-         (old-name (clution--node.name node))
-         (old-path (clution--node.path node))
-         (node-id (clution--node.node-id node))
-         (node-type (clution--node.type node))
+         (id (cdr (clution--component.id component))))
+    (clution--cl-clution-eval
+     `(move-component-up ',system-path ',id))))
+
+(defun clution--move-component-down (component)
+  (let* ((system (clution--component.system component))
+         (system-path (clution--system.path system))
+         (id (cdr (clution--component.id component))))
+    (clution--cl-clution-eval
+     `(move-component-down ',system-path ',id))))
+
+(defun clution--rename-component (component)
+  (let* ((system (clution--component.system component))
+         (system-path (clution--system.path system))
+         (parent (clution--component.parent component))
+         (parent-dir (file-name-as-directory (clution--component.path parent)))
+         (old-name (clution--component.name component))
+         (old-path (clution--component.path component))
+         (id (cdr (clution--component.id component)))
+         (component-type (clution--component.type component))
          (new-name
           (let ((str (read-string (format "'%s' rename to: " old-name))))
-            (cl-ecase node-type
+            (cl-ecase component-type
               (:file (string-remove-suffix ".lisp" str))
-              (:module (directory-file-name (file-name-as-directory str))))))
+              (:module (directory-file-name (file-name-as-directory str)))
+              (:static-file str))))
          (new-path
           (expand-file-name
-           (cl-ecase node-type
+           (cl-ecase component-type
              (:file (concat new-name ".lisp"))
-             (:module (file-name-as-directory new-name)))
+             (:module (file-name-as-directory new-name))
+             (:static-file new-name))
            parent-dir)))
     (when (file-exists-p old-path)
-      (cl-ecase node-type
+      (cl-ecase component-type
         (:file
          (unless (file-exists-p (file-name-directory new-path))
            (make-directory (file-name-directory new-path) t)))
         (:module
          (unless (file-exists-p (file-name-directory (directory-file-name new-path)))
-           (make-directory (file-name-directory (directory-file-name new-path))))))
+           (make-directory (file-name-directory (directory-file-name new-path)))))
+        (:static-file
+         (unless (file-exists-p (file-name-directory new-path))
+           (make-directory (file-name-directory new-path) t))))
       (rename-file old-path new-path))
 
-    (clution--cl-clution-eval `(rename-component ',system-path ',node-id ',new-name))))
+    (clution--cl-clution-eval `(rename-component ',system-path ',id ',new-name))))
 
-(defun clution--remove-system-item (node &optional delete)
-  (let* ((system (clution--node.system node))
+(defun clution--remove-component (component &optional delete)
+  (let* ((system (clution--component.system component))
          (system-path (clution--system.path system))
-         (name (clution--node.name node))
-         (path (clution--node.path node))
-         (node-id (clution--node.node-id node)))
+         (name (clution--component.name component))
+         (path (clution--component.path component))
+         (id (cdr (clution--component.id component))))
     (cond
      ((not delete)
       (when (y-or-n-p (format "confirm: Remove component '%s'? (%s)" name path))
-        (clution--cl-clution-eval `(remove-component ',system-path ',node-id))))
+        (clution--cl-clution-eval `(remove-component ',system-path ',id))))
      (t
       (when (y-or-n-p (format "confirm: Permanently delete component '%s'? (%s)" name path))
         (if (directory-name-p path)
             (delete-directory path t)
           (delete-file path))
-        (clution--cl-clution-eval `(remove-component ',system-path ',node-id)))))))
+        (clution--cl-clution-eval `(remove-component ',system-path ',id)))))))
 
-(defun clution--add-system-dependency (node)
-  (let* ((system (clution--node.system node))
+(defun clution--add-system-dependency (component)
+  (let* ((system (clution--component.system component))
          (system-path (clution--system.path system))
-         (node-id (clution--node.node-id node))
+         (id (cdr (clution--component.id component)))
          (dependency (read-string "dependency to add: ")))
 
     (clution--cl-clution-eval
-     `(add-depends-on ',system-path ',node-id ',dependency))))
+     `(add-depends-on ',system-path ',id ',dependency))))
 
-(defun clution--remove-system-dependency (node dependency)
-  (let* ((system (clution--node.system node))
+(defun clution--remove-system-dependency (component dependency)
+  (let* ((system (clution--component.system component))
          (system-path (clution--system.path system))
-         (node-id (clution--node.node-id node)))
+         (id (cdr (clution--component.id component))))
 
     (clution--cl-clution-eval
-     `(remove-depends-on ',system-path ',node-id ',dependency))))
+     `(remove-depends-on ',system-path ',id ',dependency))))
 
 (defvar *clution--current-clution* nil
   "The currently open clution.")
@@ -391,19 +463,6 @@ Returns the window displaying the buffer"
             mru)
         (get-buffer-window (switch-to-buffer buffer))))))
 
-(defun clution--toggle-system-fold (system)
-  (let ((node (clution--system.query-node system)))
-    (clution--node.set-folded node (not (clution--node.folded node))))
-  (clution--refresh-clutex))
-
-(defun clution--toggle-module-fold (parent)
-  (clution--node.set-folded parent (not (clution--node.folded parent)))
-  (clution--refresh-clutex))
-
-(defun clution--toggle-depends-on-fold (parent)
-  (clution--depends-on.set-folded parent (not (clution--depends-on.folded parent)))
-  (clution--refresh-clutex))
-
 (defun clution--insert-clution-button (clution indent)
   (insert-char ?\s indent)
   (lexical-let* ((clution clution)
@@ -425,7 +484,7 @@ Returns the window displaying the buffer"
 
     (define-key map (kbd "A") 'clution-add-system)
     (define-key map (kbd "N") 'clution-create-system)
-
+    (define-key map (kbd "C-S-N") 'clution-create-directory)
     (let ((mouse-menu (make-sparse-keymap)))
       (define-key map (kbd "<mouse-3>")
         mouse-menu)
@@ -446,7 +505,9 @@ Returns the window displaying the buffer"
         (define-key-after (lookup-key mouse-menu [add]) [add-system]
           '(menu-item "Existing System..." clution-add-system))
         (define-key-after (lookup-key mouse-menu [add]) [create-system]
-          '(menu-item "New System..." clution-create-system)))
+          '(menu-item "New System..." clution-create-system))
+        (define-key-after (lookup-key mouse-menu [add]) [create-directory]
+          '(menu-item "New Directory..." clution-create-directory)))
 
       (define-key-after mouse-menu [separator-open]
         '(menu-item "--"))
@@ -457,44 +518,183 @@ Returns the window displaying the buffer"
                        (interactive)
                        (clution--clutex-open-file (clution--clution.path clution)))))))
   (insert "\n")
-  (when (clution--clution.qlfile-p clution)
-    (clution--insert-qlfile-button clution (+ indent 2)))
-  (dolist (system (clution--clution.systems clution))
-    (clution--insert-system-button system (+ indent 2))))
+  (dolist (item (clution--clution.items clution))
+    (clution--insert-item-button item (+ indent 2))))
 
-(defun clution--insert-qlfile-button (clution indent)
+(defun clution--insert-item-button (item indent)
+  (cl-ecase (clution--item.type item)
+    (:dir
+     (clution--insert-dir-button item indent))
+    (:system
+     (clution--insert-system-button item indent))))
+
+(defun clution--insert-dir-button (dir indent)
   (insert-char ?\s indent)
-  (lexical-let* ((clution clution)
+  (lexical-let* ((dir dir)
+                 (clution (clution--item.clution dir))
+                 (fold-map
+                  (make-sparse-keymap))
+                 (folded (clution--item.folded dir))
+                 (fold-button
+                  (insert-button
+                   (if folded "▸ " "▾ ")
+                   'face 'clution-clutex-dir-face
+                   'help-echo nil
+                   'keymap fold-map))
                  (map (make-sparse-keymap))
                  (button
                   (insert-button
-                   (file-name-nondirectory (clution--clution.qlfile-path clution))
-                   'face 'clution-clutex-file-face
-                   'help-echo (clution--clution.qlfile-path clution)
+                   (concat (clution--dir.name dir) "/")
+                   'face 'clution-clutex-dir-face
+                   'help-echo nil
                    'keymap map)))
+    (define-key fold-map (kbd "C-m")
+      (lambda ()
+        (interactive)
+        (clution--toggle-item-fold dir)))
+    (define-key fold-map (kbd "TAB")
+      (lambda ()
+        (interactive)
+        (clution--toggle-item-fold dir)))
+    (define-key fold-map (kbd "<mouse-1>")
+      (lambda ()
+        (interactive)
+        (clution--toggle-item-fold dir)))
     (define-key map (kbd "C-m")
       (lambda ()
         (interactive)
-        (clution--clutex-open-file (clution--clution.qlfile-path clution))))
-    (define-key map (kbd "<double-down-mouse-1>")
+        (clution--toggle-item-fold dir)))
+    (define-key map (kbd "TAB")
       (lambda ()
         (interactive)
-        (clution--clutex-open-file (clution--clution.qlfile-path clution)))))
-  (insert "\n"))
+        (clution--toggle-item-fold dir)))
+    (define-key map (kbd "<mouse-1>")
+      (lambda ()
+        (interactive)
+        (clution--toggle-item-fold dir)))
+    (define-key fold-map (kbd "A")
+      (lambda ()
+        (interactive)
+        (clution--add-system clution dir)))
+    (define-key map (kbd "A")
+      (lambda ()
+        (interactive)
+        (clution--add-system clution dir)))
+    (define-key fold-map (kbd "N")
+      (lambda ()
+        (interactive)
+        (clution--create-system clution dir)))
+    (define-key map (kbd "N")
+      (lambda ()
+        (interactive)
+        (clution--create-system clution dir)))
+    (define-key fold-map (kbd "C-S-N")
+      (lambda ()
+        (interactive)
+        (clution--add-directory clution dir)))
+    (define-key map (kbd "C-S-N")
+      (lambda ()
+        (interactive)
+        (clution--add-directory clution dir)))
+    (define-key fold-map (kbd "D")
+      (lambda ()
+        (interactive)
+        (clution--remove-directory dir)))
+    (define-key fold-map (kbd "<delete>")
+      (lambda ()
+        (interactive)
+        (clution--remove-directory dir)))
+    (define-key fold-map (kbd "S-<delete>")
+      (lambda ()
+        (interactive)
+        (clution--remove-directory dir)))
+    (define-key map (kbd "D")
+      (lambda ()
+        (interactive)
+        (clution--remove-directory dir)))
+    (define-key map (kbd "<delete>")
+      (lambda ()
+        (interactive)
+        (clution--remove-directory dir)))
+    (define-key map (kbd "S-<delete>")
+      (lambda ()
+        (interactive)
+        (clution--remove-directory dir)))
+    (define-key fold-map (kbd "<C-up>")
+      (lambda ()
+        (interactive)
+        (clution--move-item-up dir)))
+    (define-key map (kbd "<C-up>")
+      (lambda ()
+        (interactive)
+        (clution--move-item-up dir)))
+    (define-key fold-map (kbd "<C-down>")
+      (lambda ()
+        (interactive)
+        (clution--move-item-down dir)))
+    (define-key map (kbd "<C-down>")
+      (lambda ()
+        (interactive)
+        (clution--move-item-down dir)))
+    (define-key fold-map (kbd "R")
+      (lambda ()
+        (interactive)
+        (clution--rename-dir dir)))
+    (define-key map (kbd "R")
+      (lambda ()
+        (interactive)
+        (clution--rename-dir dir)))
+    (let ((mouse-menu (make-sparse-keymap)))
+      (define-key fold-map (kbd "<mouse-3>")
+        mouse-menu)
+      (define-key map (kbd "<mouse-3>")
+        mouse-menu)
+
+      (let ((add-menu (make-sparse-keymap)))
+        (define-key-after mouse-menu [add]
+          `(menu-item "Add" ,add-menu))
+        (define-key-after (lookup-key mouse-menu [add]) [add-system]
+          `(menu-item "Existing System..."
+                      ,(lambda ()
+                         (interactive)
+                         (clution--add-system clution dir))))
+        (define-key-after (lookup-key mouse-menu [add]) [create-system]
+          `(menu-item "New System..."
+                      ,(lambda ()
+                         (interactive)
+                         (clution--create-system clution dir))))
+        (define-key-after (lookup-key mouse-menu [add]) [create-directory]
+          `(menu-item "New Directory..."
+                      ,(lambda ()
+                         (interactive)
+                         (clution--add-directory clution dir)))))
+
+      (define-key-after mouse-menu [separator-delete]
+        '(menu-item "--"))
+      (define-key-after mouse-menu [delete]
+        `(menu-item "Delete"
+                    ,(lambda ()
+                       (interactive)
+                       (clution--remove-directory dir)))))
+    (insert "\n")
+    (unless folded
+      (dolist (item (clution--dir.items dir))
+        (clution--insert-item-button item (+ indent 2))))))
 
 (defun clution--insert-system-button (system indent)
   (insert-char ?\s indent)
   (lexical-let* ((system system)
                  (clution (clution--system.clution system))
                  (selected (eq system (clution--clution.selected-system)))
-                 (node (clution--system.query-node system))
+                 (component (clution--system.query-node system))
                  (loaded (clution--system.loaded system))
+                 (folded (clution--item.folded system))
                  (fold-map (make-sparse-keymap))
                  (fold-button
                   (insert-button
                    (cond
                     ((not loaded) "✘ ")
-                    ((clution--node.folded node) "▸ ")
+                    (folded "▸ ")
                     (t "▾ "))
                    'face 'clution-clutex-system-face
                    'help-echo nil
@@ -513,23 +713,23 @@ Returns the window displaying the buffer"
       (define-key fold-map (kbd "C-m")
         (lambda ()
           (interactive)
-          (clution--toggle-system-fold system)))
+          (clution--toggle-item-fold system)))
       (define-key fold-map (kbd "TAB")
         (lambda ()
           (interactive)
-          (clution--toggle-system-fold system)))
+          (clution--toggle-item-fold system)))
       (define-key fold-map (kbd "<mouse-1>")
         (lambda ()
           (interactive)
-          (clution--toggle-system-fold system)))
+          (clution--toggle-item-fold system)))
       (define-key map (kbd "TAB")
         (lambda ()
           (interactive)
-          (clution--toggle-system-fold system)))
+          (clution--toggle-item-fold system)))
       (define-key map (kbd "<mouse-1>")
         (lambda ()
           (interactive)
-          (clution--toggle-system-fold system)))
+          (clution--toggle-item-fold system)))
       (define-key fold-map (kbd "<delete>")
         (lambda ()
           (interactive)
@@ -565,27 +765,27 @@ Returns the window displaying the buffer"
       (define-key fold-map (kbd "A")
         (lambda ()
           (interactive)
-          (clution--add-system-file node)))
+          (clution--add-system-file component)))
       (define-key map (kbd "A")
         (lambda ()
           (interactive)
-          (clution--add-system-file node)))
+          (clution--add-system-file component)))
       (define-key fold-map (kbd "N")
         (lambda ()
           (interactive)
-          (clution--create-system-file node)))
+          (clution--create-system-file component)))
       (define-key map (kbd "N")
         (lambda ()
           (interactive)
-          (clution--create-system-file node)))
+          (clution--create-system-file component)))
       (define-key fold-map (kbd "C-S-N")
         (lambda ()
           (interactive)
-          (clution--create-system-module node)))
+          (clution--create-system-module component)))
       (define-key map (kbd "C-S-N")
         (lambda ()
           (interactive)
-          (clution--create-system-module system)))
+          (clution--create-system-module component)))
 
       (let ((mouse-menu (make-sparse-keymap)))
         (define-key map (kbd "<mouse-3>")
@@ -619,17 +819,17 @@ Returns the window displaying the buffer"
             `(menu-item "New file..."
                         ,(lambda ()
                            (interactive)
-                           (clution--create-system-file node))))
+                           (clution--create-system-file component))))
           (define-key-after (lookup-key mouse-menu [add]) [add-file]
             `(menu-item "Existing file..."
                         ,(lambda ()
                            (interactive)
-                           (clution--add-system-file node))))
+                           (clution--add-system-file component))))
           (define-key-after (lookup-key mouse-menu [add]) [create-module]
             `(menu-item "New module..."
                         ,(lambda ()
                            (interactive)
-                           (clution--create-system-module node)))))
+                           (clution--create-system-module component)))))
 
         (define-key-after mouse-menu [separator-select]
           '(menu-item "--"))
@@ -698,18 +898,19 @@ Returns the window displaying the buffer"
                          (clution--update-system-query system)
                          (clution--refresh-clutex)))))))
     (insert "\n")
-    (when loaded
-      (unless (clution--node.folded node)
-        (clution--insert-depends-on node (+ indent 2))
-        (dolist (component (clution--node.children node))
-          (clution--insert-component-button component (+ indent 2)))))))
+    (when (and loaded (not folded))
+      (clution--insert-depends-on component (+ indent 2))
+      (dolist (component (clution--component.children component))
+        (clution--insert-component-button component (+ indent 2))))))
 
-(defun clution--insert-component-button (node indent)
-  (cl-ecase  (clution--node.type node)
+(defun clution--insert-component-button (component indent)
+  (cl-ecase  (clution--component.type component)
     (:file
-     (clution--insert-file-component-button node indent))
+     (clution--insert-file-component-button component indent))
     (:module
-     (clution--insert-module-component-button node indent))))
+     (clution--insert-module-component-button component indent))
+    (:static-file
+     (clution--insert-file-component-button component indent))))
 
 (defun clution--insert-module-component-button (module indent)
   (insert-char ?\s indent)
@@ -718,65 +919,65 @@ Returns the window displaying the buffer"
                   (make-sparse-keymap))
                  (fold-button
                   (insert-button
-                   (if (clution--node.folded module) "▸ " "▾ ")
+                   (if (clution--component.folded module) "▸ " "▾ ")
                    'face 'clution-clutex-dir-face
                    'help-echo nil
                    'keymap fold-map))
                  (map (make-sparse-keymap))
                  (button
                   (insert-button
-                   (concat (clution--node.name module) "/")
+                   (concat (clution--component.name module) "/")
                    'face 'clution-clutex-dir-face
-                   'help-echo (clution--node.path module)
+                   'help-echo (clution--component.path module)
                    'keymap map)))
     (define-key fold-map (kbd "C-m")
       (lambda ()
         (interactive)
-        (clution--toggle-module-fold module)))
+        (clution--toggle-component-fold module)))
     (define-key fold-map (kbd "TAB")
       (lambda ()
         (interactive)
-        (clution--toggle-module-fold module)))
+        (clution--toggle-component-fold module)))
     (define-key fold-map (kbd "<mouse-1>")
       (lambda ()
         (interactive)
-        (clution--toggle-module-fold module)))
+        (clution--toggle-component-fold module)))
     (define-key map (kbd "C-m")
       (lambda ()
         (interactive)
-        (clution--toggle-module-fold module)))
+        (clution--toggle-component-fold module)))
     (define-key map (kbd "TAB")
       (lambda ()
         (interactive)
-        (clution--toggle-module-fold module)))
+        (clution--toggle-component-fold module)))
     (define-key map (kbd "<mouse-1>")
       (lambda ()
         (interactive)
-        (clution--toggle-module-fold module)))
+        (clution--toggle-component-fold module)))
     (define-key fold-map (kbd "D")
       (lambda ()
         (interactive)
-        (clution--remove-system-item module nil)))
+        (clution--remove-component module nil)))
     (define-key fold-map (kbd "<delete>")
       (lambda ()
         (interactive)
-        (clution--remove-system-item module nil)))
+        (clution--remove-component module nil)))
     (define-key fold-map (kbd "S-<delete>")
       (lambda ()
         (interactive)
-        (clution--remove-system-item module t)))
+        (clution--remove-component module t)))
     (define-key map (kbd "D")
       (lambda ()
         (interactive)
-        (clution--remove-system-item module nil)))
+        (clution--remove-component module nil)))
     (define-key map (kbd "<delete>")
       (lambda ()
         (interactive)
-        (clution--remove-system-item module nil)))
+        (clution--remove-component module nil)))
     (define-key map (kbd "S-<delete>")
       (lambda ()
         (interactive)
-        (clution--remove-system-item module t)))
+        (clution--remove-component module t)))
     (define-key fold-map (kbd "A")
       (lambda ()
         (interactive)
@@ -804,27 +1005,27 @@ Returns the window displaying the buffer"
     (define-key fold-map (kbd "<C-up>")
       (lambda ()
         (interactive)
-        (clution--move-system-item-up module)))
+        (clution--move-component-up module)))
     (define-key map (kbd "<C-up>")
       (lambda ()
         (interactive)
-        (clution--move-system-item-up module)))
+        (clution--move-component-up module)))
     (define-key fold-map (kbd "<C-down>")
       (lambda ()
         (interactive)
-        (clution--move-system-item-down module)))
+        (clution--move-component-down module)))
     (define-key map (kbd "<C-down>")
       (lambda ()
         (interactive)
-        (clution--move-system-item-down module)))
+        (clution--move-component-down module)))
     (define-key fold-map (kbd "R")
       (lambda ()
         (interactive)
-        (clution--rename-system-item module)))
+        (clution--rename-component module)))
     (define-key map (kbd "R")
       (lambda ()
         (interactive)
-        (clution--rename-system-item module)))
+        (clution--rename-component module)))
 
     (let ((mouse-menu (make-sparse-keymap)))
       (define-key map (kbd "<mouse-3>")
@@ -860,13 +1061,13 @@ Returns the window displaying the buffer"
         `(menu-item "Move Up"
                     ,(lambda ()
                        (interactive)
-                       (clution--move-system-item-up module))))
+                       (clution--move-component-up module))))
 
       (define-key-after mouse-menu [move-down]
         `(menu-item "Move Down"
                     ,(lambda ()
                        (interactive)
-                       (clution--move-system-item-down module))))
+                       (clution--move-component-down module))))
 
       (define-key-after mouse-menu [separator-delete]
         '(menu-item "--"))
@@ -875,10 +1076,10 @@ Returns the window displaying the buffer"
         `(menu-item "Delete"
                     ,(lambda ()
                        (interactive)
-                       (clution--remove-system-item module t))))))
+                       (clution--remove-component module t))))))
   (insert "\n")
-  (unless (clution--node.folded module)
-    (dolist (component (clution--node.children module))
+  (unless (clution--component.folded module)
+    (dolist (component (clution--component.children module))
       (clution--insert-component-button component (+ indent 2)))))
 
 (defun clution--insert-file-component-button (file indent)
@@ -887,55 +1088,55 @@ Returns the window displaying the buffer"
                  (map (make-sparse-keymap))
                  (button
                   (insert-button
-                   (concat (clution--node.name file)
-                           (file-name-extension (clution--node.path file) t))
+                   (concat (clution--component.name file)
+                           (file-name-extension (clution--component.path file) t))
                    'face 'clution-clutex-file-face
-                   'help-echo (clution--node.path file)
+                   'help-echo (clution--component.path file)
                    'keymap map)))
     (define-key map (kbd "C-m")
       (lambda ()
         (interactive)
-        (clution--clutex-open-file (clution--node.path file))))
+        (clution--clutex-open-file (clution--component.path file))))
     (define-key map (kbd "<double-down-mouse-1>")
       (lambda ()
         (interactive)
-        (clution--clutex-open-file (clution--node.path file))))
+        (clution--clutex-open-file (clution--component.path file))))
     (define-key map (kbd "D")
       (lambda ()
         (interactive)
-        (clution--remove-system-item file nil)))
+        (clution--remove-component file nil)))
     (define-key map (kbd "<delete>")
       (lambda ()
         (interactive)
-        (clution--remove-system-item file nil)))
+        (clution--remove-component file nil)))
     (define-key map (kbd "S-<delete>")
       (lambda ()
         (interactive)
-        (clution--remove-system-item file t)))
+        (clution--remove-component file t)))
     (define-key map (kbd "A")
       (lambda ()
         (interactive)
-        (clution--add-system-file (clution--node.parent file))))
+        (clution--add-system-file (clution--component.parent file))))
     (define-key map (kbd "N")
       (lambda ()
         (interactive)
-        (clution--create-system-file (clution--node.parent file))))
+        (clution--create-system-file (clution--component.parent file))))
     (define-key map (kbd "C-S-N")
       (lambda ()
         (interactive)
-        (clution--create-system-module (clution--node.parent file))))
+        (clution--create-system-module (clution--component.parent file))))
     (define-key map (kbd "<C-up>")
       (lambda ()
         (interactive)
-        (clution--move-system-item-up file)))
+        (clution--move-component-up file)))
     (define-key map (kbd "<C-down>")
       (lambda ()
         (interactive)
-        (clution--move-system-item-down file)))
+        (clution--move-component-down file)))
     (define-key map (kbd "R")
       (lambda ()
         (interactive)
-        (clution--rename-system-item file)))
+        (clution--rename-component file)))
 
     (let ((mouse-menu (make-sparse-keymap)))
       (define-key map (kbd "<mouse-3>")
@@ -945,7 +1146,7 @@ Returns the window displaying the buffer"
         `(menu-item "Open"
                     ,(lambda ()
                        (interactive)
-                       (clution--clutex-open-file (clution--node.path file)))))
+                       (clution--clutex-open-file (clution--component.path file)))))
       (define-key-after mouse-menu [separator-move-up]
         '(menu-item "--"))
 
@@ -953,13 +1154,13 @@ Returns the window displaying the buffer"
         `(menu-item "Move Up"
                     ,(lambda ()
                        (interactive)
-                       (clution--move-system-item-up file))))
+                       (clution--move-component-up file))))
 
       (define-key-after mouse-menu [move-down]
         `(menu-item "Move Down"
                     ,(lambda ()
                        (interactive)
-                       (clution--move-system-item-down file))))
+                       (clution--move-component-down file))))
 
       (define-key-after mouse-menu [separator-delete]
         '(menu-item "--"))
@@ -968,23 +1169,23 @@ Returns the window displaying the buffer"
         `(menu-item "Delete"
                     ,(lambda ()
                        (interactive)
-                       (clution--remove-system-item file t))))
+                       (clution--remove-component file t))))
       (define-key-after mouse-menu [rename]
         `(menu-item "Rename"
                     ,(lambda ()
                        (interactive)
-                       (clution--rename-system-item file))))))
+                       (clution--rename-component file))))))
   (insert "\n"))
 
-(defun clution--insert-depends-on (node indent)
+(defun clution--insert-depends-on (component indent)
   (insert-char ?\s indent)
-  (lexical-let* ((node node)
-                 (depends-on (clution--node.depends-on node))
+  (lexical-let* ((component component)
+                 (depends-on (clution--component.depends-on component))
                  (fold-map
                   (make-sparse-keymap))
                  (fold-button
                   (insert-button
-                   (if (clution--depends-on.folded node) "▸ " "▾ ")
+                   (if (clution--depends-on.folded component) "▸ " "▾ ")
                    'face 'clution-clutex-dependencies-face
                    'help-echo nil
                    'keymap fold-map))
@@ -998,35 +1199,35 @@ Returns the window displaying the buffer"
     (define-key fold-map (kbd "C-m")
       (lambda ()
         (interactive)
-        (clution--toggle-depends-on-fold node)))
+        (clution--toggle-depends-on-fold component)))
     (define-key fold-map (kbd "TAB")
       (lambda ()
         (interactive)
-        (clution--toggle-depends-on-fold node)))
+        (clution--toggle-depends-on-fold component)))
     (define-key fold-map (kbd "<mouse-1>")
       (lambda ()
         (interactive)
-        (clution--toggle-depends-on-fold node)))
+        (clution--toggle-depends-on-fold component)))
     (define-key map (kbd "C-m")
       (lambda ()
         (interactive)
-        (clution--toggle-depends-on-fold node)))
+        (clution--toggle-depends-on-fold component)))
     (define-key map (kbd "TAB")
       (lambda ()
         (interactive)
-        (clution--toggle-depends-on-fold node)))
+        (clution--toggle-depends-on-fold component)))
     (define-key map (kbd "<mouse-1>")
       (lambda ()
         (interactive)
-        (clution--toggle-depends-on-fold node)))
+        (clution--toggle-depends-on-fold component)))
     (define-key map (kbd "A")
       (lambda ()
         (interactive)
-        (clution--add-system-dependency node)))
+        (clution--add-system-dependency component)))
     (define-key fold-map (kbd "A")
       (lambda ()
         (interactive)
-        (clution--add-system-dependency node)))
+        (clution--add-system-dependency component)))
 
     (let ((mouse-menu (make-sparse-keymap)))
       (define-key map (kbd "<mouse-3>")
@@ -1038,9 +1239,9 @@ Returns the window displaying the buffer"
         `(menu-item "Add Dependency..."
                     ,(lambda ()
                        (interactive)
-                       (clution--add-system-dependency node)))))
+                       (clution--add-system-dependency component)))))
 
-    (unless (clution--depends-on.folded node)
+    (unless (clution--depends-on.folded component)
       (dolist (dependency depends-on)
         (insert "\n")
         (insert-char ?\s (+ indent 2))
@@ -1054,15 +1255,15 @@ Returns the window displaying the buffer"
           (define-key dep-map (kbd "D")
             (lambda ()
               (interactive)
-              (clution--remove-system-dependency node dependency)))
+              (clution--remove-system-dependency component dependency)))
           (define-key dep-map (kbd "<delete>")
             (lambda ()
               (interactive)
-              (clution--remove-system-dependency node dependency)))
+              (clution--remove-system-dependency component dependency)))
           (define-key dep-map (kbd "A")
             (lambda ()
               (interactive)
-              (clution--add-system-dependency node)))
+              (clution--add-system-dependency component)))
 
           (let ((mouse-map (make-sparse-keymap)))
             (define-key dep-map (kbd "<mouse-3>")
@@ -1072,12 +1273,12 @@ Returns the window displaying the buffer"
               `(menu-item "Remove"
                           ,(lambda ()
                              (interactive)
-                             (clution--remove-system-dependency node dependency)))))))))
+                             (clution--remove-system-dependency component dependency)))))))))
   (insert "\n"))
 
-(defun clution--populate-clutex (clution buffer &aux (indent 0))
+(defun clution--populate-clutex (clution buffer)
   (with-current-buffer buffer
-    (clution--insert-clution-button clution indent)))
+    (clution--insert-clution-button clution 0)))
 
 (defun clution--output-buffer (&optional create)
   (let ((buffer (get-buffer " *clution-output*")))
@@ -1139,12 +1340,17 @@ Returns the window displaying the buffer"
     "asd-clution"
     (clution--app-data-dir))))
 
-(defun clution--qlfile-bundle-dir ()
-  "Directory where clution stores qlfile-generated bundles for clutions."
-  (file-name-as-directory
-   (expand-file-name
-    "qlfile-bundle"
-    (clution--app-data-dir))))
+(defun clution--asd-clution-path (asd-path)
+  "Calculate the path to an autogenerated clution from `asd-path'"
+  (expand-file-name
+   (concat (file-name-base asd-path) ".clu")
+   (file-name-as-directory
+    (expand-file-name
+     (secure-hash 'md5 asd-path)
+     (file-name-as-directory
+      (expand-file-name
+       (file-name-base asd-path)
+       (clution--asd-clution-dir)))))))
 
 (defun clution--set-file-hidden-flag (path &optional hidden)
   (unless (eq system-type 'windows-nt)
@@ -1252,21 +1458,6 @@ Returns the window displaying the buffer"
            (warn "clution: error loading system '%s': %s" (clution--system.name system) err)
            nil))))
 
-(defun clution--insert-system (system indent)
-  (let ((clution (clution--system.clution system)))
-    (insert "(:path \""
-            (file-relative-name
-             (clution--system.path system)
-             (clution--clution.dir clution))
-            "\"")
-    (when-let ((startup-dir (cl-getf system :startup-dir)))
-      (insert " :startup-dir " (format "%S" startup-dir)))
-    (when-let ((toplevel (cl-getf system :toplevel)))
-      (insert " :toplevel " (format "%S" toplevel)))
-    (when-let ((type (cl-getf system :type)))
-      (insert " :type " (format "%S" type)))
-    (insert ")")))
-
 (defun clution--make-system (data &optional clution)
   (unless (cl-getf data :path)
     (error "clution: system missing :path component: %S" data))
@@ -1290,11 +1481,11 @@ Returns the window displaying the buffer"
     res))
 
 (defun clution--insert-cuo (cuo indent)
-  (insert "(")
-  (insert ":selected-system " (format "%S" (clution--cuo.selected-system cuo)))
-  (insert " :system-args " (format "%S" (cl-getf cuo :system-args)))
-  (insert " :fold-states " (format "%S" (clution--cuo.fold-states cuo)))
-  (insert ")"))
+  (insert
+   (pp-to-string
+    (list
+     :selected-system (clution--cuo.selected-system cuo)
+     :item-properties (clution--cuo.item-properties cuo)))))
 
 (defun clution--save-cuo (&optional cuo path)
   (unless cuo
@@ -1307,200 +1498,122 @@ Returns the window displaying the buffer"
     (with-temp-file path
       (clution--insert-cuo cuo 0))))
 
-(defun clution--make-cuo (data)
+(defun clution--make-cuo (plist clution)
   (let ((res
          (list
-          :selected-system (cl-getf data :selected-system)
-          :system-args (cl-getf data :system-args)
-          :fold-states (cl-getf data :fold-states))))
+          :clution clution
+          :selected-system (cl-getf plist :selected-system)
+          :item-properties (cl-getf plist :item-properties))))
     res))
 
-(defun clution--parse-cuo-file (path)
+(defun clution--parse-cuo-file (path clution)
   (clution--make-cuo
    (car
     (read-from-string
      (with-temp-buffer
        (insert-file-contents path)
-       (buffer-string))))))
-
-(defun clution--insert-clution (clution indent)
-  (insert "(")
-  (let ((first t))
-    (when-let ((out-dir (cl-getf clution :output-dir)))
-      (if first
-          (setq first nil)
-        (insert-char ?\s (1+ indent)))
-      (insert ":output-dir "
-              (format "%S" (file-name-as-directory
-                            (file-relative-name
-                             out-dir
-                             (clution--clution.dir clution))))
-              "\n"))
-    (when-let ((clu-dir (cl-getf clution :clu-dir)))
-      (if first
-          (setq first nil)
-        (insert-char ?\s (1+ indent)))
-      (insert ":clu-dir "
-              (format "%S" (file-name-as-directory
-                            (file-relative-name
-                             clu-dir
-                             (clution--clution.dir clution))))
-              "\n"))
-    (when-let ((qlfile (cl-getf clution :qlfile)))
-      (if first
-          (setq first nil)
-        (insert-char ?\s (1+ indent)))
-      (insert ":qlfile "
-              (format "%S" (file-relative-name
-                            qlfile
-                            (clution--clution.dir clution)))
-              "\n"))
-    (when-let ((qlfile-libs-dir (cl-getf clution :qlfile-libs-dir)))
-      (if first
-          (setq first nil)
-        (insert-char ?\s (1+ indent)))
-      (insert ":qlfile-libs-dir "
-              (format "%S" (file-name-as-directory
-                            (file-relative-name
-                             qlfile-libs-dir
-                             (clution--clution.dir clution))))
-              "\n"))
-    (if first
-        (setq first nil)
-      (insert-char ?\s (1+ indent)))
-    (insert ":systems")
-    (let ((systems (clution--clution.systems clution)))
-      (if systems
-          (progn
-            (insert "\n")
-            (insert-char ?\s (1+ indent))
-            (insert "(")
-            (while systems
-              (clution--insert-system (car systems) (+ indent 2))
-              (setq systems (cdr systems))
-              (when systems
-                (insert "\n")
-                (insert-char ?\s (+ indent 2))))
-            (insert ")"))
-        (insert " ()"))))
-  (insert ")\n"))
+       (buffer-string))))
+   clution))
 
 (defun clution--save-clution (&optional clution path)
-  (unless clution
-    (setf clution *clution--current-clution*))
-  (unless path
-    (setq path (clution--clution.path clution)))
-  (when path
-    (make-directory (file-name-directory path) t)
-    (with-temp-file path
-      (clution--insert-clution clution 0))))
+  ;;no-op atm. clution saves after every transaction
+  )
 
-(defun clution--make-clution (data &optional path)
-  (let ((res
-         (list
-          :path path
-          :systems nil
-          :output-dir
-          (when-let ((dir (cl-getf data :output-dir)))
-            (file-name-as-directory
-             (expand-file-name dir (file-name-directory path))))
-          :clu-dir
-          (when-let ((dir (cl-getf data :clu-dir)))
-            (file-name-as-directory
-             (expand-file-name dir (file-name-directory path))))
-          :cuo nil
-          :qlfile
-          (when-let ((qlfile (cl-getf data :qlfile)))
-            (expand-file-name qlfile (file-name-directory path)))
-          :qlfile-libs-dir
-          (when-let ((qlfile-libs-dir (cl-getf data :qlfile-libs-dir)))
-            (file-name-as-directory
-             (expand-file-name qlfile-libs-dir (file-name-directory path)))))))
-
-    (setf (cl-getf res :systems)
-          (cl-mapcar
-           (lambda (sys-data)
-             (clution--make-system sys-data res))
-           (cl-getf data :systems)))
+(defun clution--make-clution (data)
+  (unless (and (listp data)
+               (eq (car data) :clution))
+    (error "malformed clution data:\n%S" (pp-to-string data)))
+  (let* ((plist (cdr data))
+         (res
+          (list
+           :path (cl-getf plist :path)
+           :clu-dir (file-name-as-directory (cl-getf plist :clu-dir))
+           :qlfile-libs-dir (file-name-as-directory (cl-getf plist :qlfile-libs-dir))
+           :cuo nil
+           :items nil)))
+    (cl-labels ((make-dir-item (plist parent clution)
+                               (let ((id-path)
+                                     (res
+                                      (list
+                                       :type :dir
+                                       :parent parent
+                                       :clution clution
+                                       :name (cl-getf plist :name)
+                                       :items ())))
+                                 (let ((items nil))
+                                   (dolist (item (cl-getf plist :items))
+                                     (push (make-item item res clution) items))
+                                   (setf (cl-getf res :items) (nreverse items)))
+                                 res))
+                (make-component (plist parent clution)
+                                  (let ((res
+                                         (list
+                                          :type :system
+                                          :parent parent
+                                          :clution clution
+                                          :path (cl-getf plist :path)
+                                          :toplevel (cl-getf plist :toplevel)
+                                          :system-type (cl-getf plist :type)
+                                          :query-node nil)))
+                                    (clution--update-system-query res)
+                                    res))
+                (make-item (item parent clution)
+                           (unless (listp item)
+                             (error "malformed item: %s" item))
+                           (cl-ecase (car item)
+                             (:dir
+                              (make-dir-item (cdr item) parent clution))
+                             (:system
+                              (make-component (cdr item) parent clution)))))
+      (let ((items nil))
+        (dolist (item (cl-getf plist :items))
+          (push (make-item item nil res) items))
+        (setf (cl-getf res :items) (nreverse items))))
 
     (if (file-exists-p (clution--clution.cuo-path res))
-        (setf (cl-getf res :cuo) (clution--parse-cuo-file (clution--clution.cuo-path res)))
-      (setf (cl-getf res :cuo) (clution--make-cuo nil)))
-
-    (let ((cuo (cl-getf res :cuo)))
-      (setf (getf cuo :clution) res))
+        (setf (cl-getf res :cuo) (clution--parse-cuo-file (clution--clution.cuo-path res) res))
+      (setf (cl-getf res :cuo) (clution--make-cuo nil res)))
     res))
-
-(defun clution--make-asd-clution (asd-path type)
-  (let* ((asd-dir (file-name-directory asd-path))
-         (asd-clution-dir
-          (file-name-as-directory
-           (expand-file-name
-            (file-name-base asd-path)
-            (clution--asd-clution-dir))))
-         (asd-clution-path
-          (expand-file-name
-           (concat (file-name-base asd-path) ".clu")
-           asd-clution-dir)))
-    (let ((res
-           (list
-            :path asd-clution-path
-            :systems nil
-            :output-dir nil
-            :clu-dir nil
-            :cuo nil
-            :qlfile
-            (when-let ((qlfile (expand-file-name "qlfile" asd-dir))
-                       (exists (file-exists-p qlfile)))
-              qlfile)
-            :qlfile-libs-dir nil)))
-
-      (let ((sys (clution--make-system
-                  (list :path asd-path :type type)
-                  res)))
-        (setf (cl-getf res :systems) (list sys))
-        (setf (cl-getf sys :system-query) (clution--system-query sys)))
-      res)))
 
 (defun clution--parse-file (path)
   (clution--make-clution
-   (car
-    (read-from-string
-     (with-temp-buffer
-       (insert-file-contents path)
-       (buffer-string))))
-   path))
+   (clution--cl-clution-eval
+    `(clu-plist ',path))))
 
 (defun clution--clution.name (&optional clution)
   (unless clution
     (setf clution *clution--current-clution*))
-
   (downcase (file-name-base (clution--clution.path clution))))
 
 (defun clution--clution.path (&optional clution)
   (unless clution
     (setf clution *clution--current-clution*))
-
   (cl-getf clution :path))
+
+(defun clution--clution.items (&optional clution)
+  (unless clution
+    (setf clution *clution--current-clution*))
+  (cl-getf clution :items))
 
 (defun clution--clution.systems (&optional clution)
   (unless clution
     (setf clution *clution--current-clution*))
 
-  (cl-getf clution :systems))
-
-(defun clution--clution.add-system (clution system)
-  (setf (cl-getf clution :systems)
-        (nconc (cl-getf clution :systems) (list system))))
-
-(defun clution--clution.remove-system (clution system)
-  (setf (cl-getf clution :systems)
-        (delete system (cl-getf clution :systems))))
+  (let ((result ()))
+    (cl-labels ((recurse (item)
+                         (cl-ecase (clution--item.type item)
+                           (:dir
+                            (dolist (child (clution--dir.items item))
+                              (recurse child)))
+                           (:system
+                            (push item result)))))
+      (dolist (item (clution--clution.items clution))
+        (recurse item))
+      (nreverse result))))
 
 (defun clution--clution.cuo (&optional clution)
   (unless clution
     (setf clution *clution--current-clution*))
-
   (cl-getf clution :cuo))
 
 (defun clution--clution.selected-system (&optional clution)
@@ -1524,12 +1637,7 @@ Returns the window displaying the buffer"
 (defun clution--clution.clu-dir (&optional clution)
   (unless clution
     (setf clution *clution--current-clution*))
-
-  (or (cl-getf clution :clu-dir)
-      (file-name-as-directory
-       (expand-file-name
-        ".clu"
-        (clution--clution.dir clution)))))
+  (cl-getf clution :clu-dir))
 
 (defun clution--clution.cuo-dir (&optional clution)
   (unless clution
@@ -1547,17 +1655,6 @@ Returns the window displaying the buffer"
   (expand-file-name
    (concat (clution--clution.name clution) ".cuo")
    (clution--clution.cuo-dir clution)))
-
-(defun clution--clution.qlfile-libs-dir (&optional clution)
-  "Directory where a clution's qlfile libraries are stored."
-  (unless clution
-    (setf clution *clution--current-clution*))
-
-  (or (cl-getf clution :qlfile-libs-dir)
-      (file-name-as-directory
-       (expand-file-name
-        "qlfile-libs"
-        (clution--clution.clu-dir clution)))))
 
 (defun clution--clution.script-dir (&optional clution)
   (unless clution
@@ -1583,34 +1680,26 @@ Returns the window displaying the buffer"
 
   (file-name-directory (clution--clution.path clution)))
 
-(defun clution--clution.qlfile-p (&optional clution)
+(defun clution--clution.qlfile-libs-p (&optional clution)
   (unless clution
     (setf clution *clution--current-clution*))
-  (and (cl-getf clution :qlfile) t))
+  (let ((path (clution--clution.path clution)))
+    (clution--cl-clution-eval
+     `(has-clu-qlfiles ',path))))
 
-(defun clution--clution.qlfile-path (&optional clution)
-  (unless clution
-    (setf clution *clution--current-clution*))
-
-  (cl-getf clution :qlfile))
-
-(defun clution--clution.set-qlfile-path (path &optional clution)
+(defun clution--clution.qlfile-libs-up-to-date (&optional clution)
   (unless clution
     (setf clution *clution--current-clution*))
 
-  (setf (cl-getf clution :qlfile)
-        (cond
-         ((null path) nil)
-         ((file-name-absolute-p path) path)
-         (t (expand-file-name path (clution--clution.dir clution)))))
+  (let ((path (clution--clution.path clution)))
+    (clution--cl-clution-eval
+     `(are-clu-qlfile-libs-up-to-date ',path))))
 
-  (clution--save-clution clution))
-
-(defun clution--clution.qlfile-dir (&optional clution)
+(defun clution--clution.qlfile-libs-dir (&optional clution)
+  "Directory where a clution's qlfile libraries are stored."
   (unless clution
     (setf clution *clution--current-clution*))
-
-  (file-name-directory (clution--clution.qlfile-path clution)))
+  (cl-getf clution :qlfile-libs-dir))
 
 (defun clution--cuo.path (cuo)
   (clution--clution.cuo-path (clution--cuo.clution cuo)))
@@ -1624,33 +1713,75 @@ Returns the window displaying the buffer"
 (defun clution--cuo.selected-system (cuo)
   (cl-getf cuo :selected-system))
 
-(defun clution--cuo.system-args (cuo system)
-  (cdr (assoc (clution--system.name system) (cl-getf cuo :system-args))))
+(defun clution--cuo.item-properties (cuo)
+  (cl-getf cuo :item-properties))
 
-(defun clution--cuo.set-system-args (args cuo system)
-  (let* ((system-name (clution--system.name system))
-         (cons (assoc system-name (cl-getf cuo :system-args)))
-         (fixed-args (mapcar (lambda (arg) (format "%s" arg)) args)))
-    (unless cons
-      (setf cons (cons system-name fixed-args))
-      (setf (cl-getf cuo :system-args) (cons cons (cl-getf cuo :system-args))))
-    (setf (cdr args) fixed-args)))
+(defun clution--cuo.get-property (cuo id property &optional default)
+  (if-let ((properties (cl-assoc id (clution--cuo.item-properties cuo) :test #'equal)))
+      (if-let ((pcell (cl-assoc property properties :test #'equal)))
+          (cdr pcell)
+        default)
+    default))
 
-(defun clution--cuo.fold-states (cuo)
-  (cl-getf cuo :fold-states))
+(defun clution--cuo.set-property (cuo id property value)
+  (let ((properties (cl-assoc id (clution--cuo.item-properties cuo) :test #'equal)))
+    (unless properties
+      (setf properties (cons id nil))
+      (push properties (cl-getf cuo :item-properties)))
+    (let ((pcell (cl-assoc property (cdr properties) :test #'equal)))
+      (unless pcell
+        (setf pcell (cons property nil))
+        (setf (cdr properties) (push pcell (cdr properties))))
+      (setf (cdr pcell) value))))
 
-(defun clution--cuo.get-fold-state (cuo node-id)
-  (if-let ((fold-state (assoc node-id (clution--cuo.fold-states cuo))))
-      (cdr fold-state)
-    t))
+(defun clution--cuo.get-fold-state (cuo id)
+  (clution--cuo.get-property cuo id :folded t))
 
-(defun clution--cuo.set-fold-state (cuo node-id folded)
-  (let ((fold-state (assoc node-id (clution--cuo.fold-states cuo))))
-    (unless fold-state
-      (setf fold-state (cons node-id t))
-      (setf (cl-getf cuo :fold-states) (cons fold-state (clution--cuo.fold-states cuo))))
-    (setf (cdr fold-state) (and folded t)))
+(defun clution--cuo.set-fold-state (cuo id folded)
+  (clution--cuo.set-property cuo id :folded folded)
   (clution--save-cuo cuo))
+
+(defun clution--item.type (item)
+  (cl-getf item :type))
+
+(defun clution--item.clution (item)
+  (cl-getf item :clution))
+
+(defun clution--item.id (item)
+  (let ((parent-id
+         (if-let ((parent (clution--item.parent item)))
+             (clution--item.id parent)
+           nil)))
+    (cl-ecase (clution--item.type item)
+      (:dir
+       (append parent-id (list (clution--dir.name item))))
+      (:system
+       (append parent-id (list (clution--system.path item)))))))
+
+(defun clution--item.parent (item)
+  (cl-getf item :parent))
+
+(defun clution--item.folded (item)
+  (let* ((id (clution--item.id item))
+         (clution (clution--item.clution item))
+         (cuo (clution--clution.cuo clution)))
+    (clution--cuo.get-fold-state cuo id)))
+
+(defun clution--item.set-folded (item folded)
+  (let* ((id (clution--item.id item))
+         (clution (clution--item.clution item))
+         (cuo (clution--clution.cuo clution)))
+    (clution--cuo.set-fold-state cuo id folded)))
+
+(defun clution--toggle-item-fold (item)
+  (clution--item.set-folded item (not (clution--item.folded item)))
+  (clution--refresh-clutex))
+
+(defun clution--dir.name (dir)
+  (cl-getf dir :name))
+
+(defun clution--dir.items (dir)
+  (cl-getf dir :items))
 
 (defun clution--system.path (clution-system)
   (cl-getf clution-system :path))
@@ -1691,16 +1822,17 @@ Returns the window displaying the buffer"
       (clution--system.dir clution-system)))
 
 (defun clution--system.type (clution-system)
-  (or (cl-getf clution-system :type)
-      :library))
+  (cl-getf clution-system :system-type))
 
 (defun clution--system.args (clution-system)
-  (let* ((cuo (clution--system.cuo clution-system)))
-    (clution--cuo.system-args cuo clution-system)))
+  (let* ((cuo (clution--system.cuo clution-system))
+         (id (clution--item.id clution-system)))
+    (clution--cuo.get-property cuo id :args nil)))
 
 (defun clution--system.set-args (args clution-system)
-  (let* ((cuo (clution--system.cuo clution-system)))
-    (clution--cuo.set-system-args args cuo clution-system)))
+  (let* ((cuo (clution--system.cuo clution-system))
+         (id (clution--item.id clution-system)))
+    (clution--cuo.set-property cuo id :args args)))
 
 (defun clution--system.cache-dir (clution-system)
   (or (and (clution--system.clution clution-system)
@@ -1725,61 +1857,70 @@ Returns the window displaying the buffer"
     (clution--clution.output-dir (clution--system.clution clution-system))
     (clution--system.name clution-system))))
 
-(defun clution--node.clution (node)
-  (clution--system.clution (clution--node.system node)))
+(defun clution--component.clution (component)
+  (clution--system.clution (clution--component.system component)))
 
-(defun clution--node.system (node)
-  (cl-getf node :system))
+(defun clution--component.system (component)
+  (cl-getf component :system))
 
-(defun clution--node.parent (node)
-  (cl-getf node :parent))
+(defun clution--component.parent (component)
+  (cl-getf component :parent))
 
-(defun clution--node.name (node)
-  (cl-getf node :name))
+(defun clution--component.name (component)
+  (cl-getf component :name))
 
-(defun clution--node.path (node)
-  (cl-getf node :path))
+(defun clution--component.path (component)
+  (cl-getf component :path))
 
-(defun clution--node.type (node)
-  (cl-getf node :type))
+(defun clution--component.type (component)
+  (cl-getf component :type))
 
-(defun clution--node.children (node)
-  (cl-getf node :children))
+(defun clution--component.children (component)
+  (cl-getf component :children))
 
-(defun clution--node.depends-on (node)
-  (cl-getf node :depends-on))
+(defun clution--component.depends-on (component)
+  (cl-getf component :depends-on))
 
-(defun clution--node.node-id (node)
+(defun clution--component.id (component)
   (let ((res ())
-        (node node))
-    (while node
-      (push (clution--node.name node) res)
-      (setf node (clution--node.parent node)))
-    res))
+        (system-id (clution--item.id (clution--component.system component)))
+        (component component))
+    (while component
+      (push (clution--component.name component) res)
+      (setf component (clution--component.parent component)))
+    (append system-id res)))
 
-(defun clution--node.folded (node)
-  (let* ((node-id (clution--node.node-id node))
-         (clution (clution--node.clution node))
+(defun clution--component.folded (component)
+  (let* ((id (clution--component.id component))
+         (clution (clution--component.clution component))
          (cuo (clution--clution.cuo clution)))
-    (clution--cuo.get-fold-state cuo node-id)))
+    (clution--cuo.get-fold-state cuo id)))
 
-(defun clution--node.set-folded (node folded)
-  (let* ((node-id (clution--node.node-id node))
-         (clution (clution--node.clution node))
+(defun clution--component.set-folded (component folded)
+  (let* ((id (clution--component.id component))
+         (clution (clution--component.clution component))
          (cuo (clution--clution.cuo clution)))
-    (clution--cuo.set-fold-state cuo node-id folded)))
+    (clution--cuo.set-fold-state cuo id folded)))
 
-(defun clution--depends-on.folded (node)
-  (let* ((node-id (append (clution--node.node-id node) '("/depends-on/")))
-         (clution (clution--node.clution node))
-         (cuo (clution--clution.cuo clution)))
-    (clution--cuo.get-fold-state cuo node-id)))
+(defun clution--toggle-component-fold (component)
+  (clution--component.set-folded component (not (clution--component.folded component)))
+  (clution--refresh-clutex))
 
-(defun clution--depends-on.set-folded (node folded)
-  (let* ((node-id (append (clution--node.node-id node) '("/depends-on/")))
-         (clution (clution--node.clution node))
+(defun clution--depends-on.folded (component)
+  (let* ((id (append (clution--component.id component) '("/depends-on/")))
+         (clution (clution--component.clution component))
          (cuo (clution--clution.cuo clution)))
-    (clution--cuo.set-fold-state cuo node-id folded)))
+    (clution--cuo.get-fold-state cuo id)))
+
+(defun clution--depends-on.set-folded (component folded)
+  (let* ((id (append (clution--component.id component) '("/depends-on/")))
+         (clution (clution--component.clution component))
+         (cuo (clution--clution.cuo clution)))
+    (clution--cuo.set-fold-state cuo id folded)))
+
+(defun clution--toggle-depends-on-fold (module)
+  (clution--depends-on.set-folded module (not (clution--depends-on.folded module)))
+  (clution--refresh-clutex))
 
 ;;;; Frontend/Backend Lisp access
 
@@ -1907,25 +2048,6 @@ the code obtained from evaluating the given `exit-code-form'."
 
     (list ros-path)))
 
-(defun clution--qlot-command ()
-  (let ((qlot-path
-         (cond
-          ((eq clution-qlot-path 'auto)
-           (locate-file "qlot" (append exec-path '("~/.roswell/bin/")) '("" ".ros")))
-          (t
-           (and (stringp clution-qlot-path)
-                (file-exists-p clution-qlot-path)
-                clution-qlot-path)))))
-    (unless qlot-path
-      (error "qlot not installed"))
-
-    (cl-ecase system-type
-      (windows-nt
-       ;;On windows we need to run qlot through ros
-       (append (clution--ros-command) (list qlot-path)))
-      (t
-       (list qlot-path)))))
-
 (defun clution--install-system-searcher-form (clution)
   (let ((names-paths-alist
          (mapcar
@@ -1983,8 +2105,7 @@ Initializes ASDF and builds the given system."
     `(cl:progn
       (cl:handler-case
        (cl:progn
-        ,(when (clution--clution.qlfile-p clution)
-           (clution--install-qlfile-libs-searcher-form clution))
+        ,(clution--install-qlfile-libs-searcher-form clution)
         ,(clution--install-system-searcher-form clution)
         ,(clution--install-output-translations-form clution)
         (cl:let* ((cl:*standard-input* (cl:make-string-input-stream "")))
@@ -2010,8 +2131,7 @@ Initializes ASDF and loads the selected system, then calls its toplevel."
                  (cl:*trace-output* (cl:make-broadcast-stream))
                  (cl:*debug-io* (cl:make-broadcast-stream))
                  (cl:*query-io* (cl:make-broadcast-stream)))
-                ,(when (clution--clution.qlfile-p clution)
-                   (clution--install-qlfile-libs-searcher-form clution))
+                ,(clution--install-qlfile-libs-searcher-form clution)
                 ,(clution--install-system-searcher-form clution)
                 ,(clution--install-output-translations-form clution)
                 (asdf:load-system ,system-name :verbose nil)))
@@ -2034,8 +2154,7 @@ Initializes ASDF and loads the selected system."
   (let* ((clution (clution--system.clution system))
          (system-name (clution--system.name system)))
     `(cl:progn
-      ,(when (clution--clution.qlfile-p clution)
-         (clution--install-qlfile-libs-searcher-form clution))
+      ,(clution--install-qlfile-libs-searcher-form clution)
       ,(clution--install-system-searcher-form clution)
       ,(clution--install-output-translations-form clution)
       (asdf:load-system ,system-name :verbose nil))))
@@ -2129,61 +2248,26 @@ Initializes ASDF and loads the selected system."
         (set-window-point output-window (point-max))))))
 
 (defun clution--do-qlfile-sync (clution &optional cont)
-  "Synchronizes the clution's qlfile-libs to its qlfile."
-  (clution--append-output "Installing and updating qlfile packages for '" (clution--clution.name clution) "'\n")
-
-  (clution--append-output "\nInstalling qlot packages...\n\n")
-
-  (setf *clution--current-op*
-        (list
-         :type 'clution-qlot-install))
-
-  (lexical-let* ((clution clution)
-                 (cont cont)
-                 (bundle-dir (file-name-as-directory
-                              (expand-file-name
-                               (clution--clution.name clution)
-                               (clution--qlfile-bundle-dir))))
-                 (bundle-qlfile
-                  (expand-file-name "qlfile" bundle-dir))
-                 (qlfile-libs-dir (clution--clution.qlfile-libs-dir)))
-    (unless (file-exists-p bundle-dir)
-      (make-directory bundle-dir t))
-    (copy-file (clution--clution.qlfile-path clution) bundle-qlfile t)
-
-    (clution--async-proc
-     :command (append (clution--qlot-command) '("install"))
-     :dir bundle-dir
-     :filter
-     (lambda (proc string)
-       (clution--append-output string))
-     :cont
-     (lambda (code)
-       (clution--append-output "\nInstall complete. Updating...\n\n")
-       (setf *clution--current-op*
-             (list
-              :type 'clution-qlot-update))
-       (clution--async-proc
-        :command (append (clution--qlot-command) '("update"))
-        :dir bundle-dir
-        :filter
-        (lambda (proc string)
-          (clution--append-output string))
-        :cont
-        (lambda (code)
-          (clution--append-output "\nUpdate complete\n\n")
-          (setf *clution--current-op* nil)
-          (when (file-exists-p qlfile-libs-dir)
-            (delete-directory qlfile-libs-dir t nil))
-          (make-directory qlfile-libs-dir t)
-
-          (dolist (dist-dir (directory-files (expand-file-name "quicklisp/dists/" bundle-dir) t "[^.|..|quicklisp]"))
-            (dolist (package-dir (directory-files (expand-file-name "software/" dist-dir) t "[^.|..]"))
-              (copy-directory
-               (file-name-as-directory package-dir)
-               qlfile-libs-dir t t nil)))
-          (when cont
-            (funcall cont))))))))
+  "Synchronizes the qlfiles of the clution's systems."
+  (let ((name (clution--clution.name clution))
+        (path (clution--clution.path clution)))
+    (cond
+     ((clution--clution.qlfile-libs-p clution)
+      (clution--append-output "Installing qlfile packages for '" (clution--clution.name clution) "'\n")
+      (clution--cl-clution-eval-async
+       `(sync-clu-qlfiles ',path)
+       (lexical-let ((cont cont))
+         (lambda (eval-success result)
+           (cond
+            (eval-success
+             (clution--append-output "Finished installing qlfile packages\n"))
+            (t
+             (clution--append-output "Error installing qlfile packages:\n\t" (format "%s" result))))
+           (when cont
+             (funcall cont))))))
+     (t
+      (when cont
+        (funcall cont))))))
 
 (defun clution--do-build (systems &optional cont)
   (clution--append-output
@@ -2267,7 +2351,7 @@ Initializes ASDF and loads the selected system."
     (make-directory out-dir t)
 
     ;;bundle qlfile dependencies
-    (when (clution--clution.qlfile-p clution)
+    (when (clution--clution.qlfile-libs-p clution)
       (clution--append-output
        "Bundling qlfile packages...\n")
       (make-directory out-qlfile-libs-dir t)
@@ -2290,8 +2374,8 @@ Initializes ASDF and loads the selected system."
                               (expand-file-name system-name out-systems-dir))))
         (clution--append-output
          "\n\tBundling '" system-name "'\n")
-        (cl-labels ((recurse (node)
-                             (let* ((path (clution--node.path node))
+        (cl-labels ((recurse (component)
+                             (let* ((path (clution--component.path component))
                                     (rel-path (file-relative-name path system-dir))
                                     (new-path (expand-file-name rel-path system-out-dir)))
                                (cond
@@ -2305,7 +2389,7 @@ Initializes ASDF and loads the selected system."
                                   "\t\tCopying '" path "'\n"
                                   "\t\t\tto '" new-path "'\n")
                                  (copy-file path new-path nil t nil nil)))
-                               (cl-mapc #'recurse (clution--node.children node)))))
+                               (cl-mapc #'recurse (clution--component.children component)))))
           (recurse (clution--system.query-node system))
           ;;Copy the asd itself
           (copy-file system-path
@@ -2332,19 +2416,18 @@ Initializes ASDF and loads the selected system."
         `(eval-when (:compile-toplevel :load-toplevel :execute)
            (handler-case
                (progn
-                 ,@(when (clution--clution.qlfile-p clution)
-                     `((let ((qlfile-libs-paths
-                              (directory (merge-pathnames "qlfile-libs/**/*.asd" *load-truename*))))
-                         (flet ((clution-qlfile-libs-searcher (system-name)
-                                                              (loop
-                                                               :for path :in qlfile-libs-paths
-                                                               :if (string-equal system-name (pathname-name path))
-                                                               :return path)))
-                           (push (function clution-qlfile-libs-searcher)
-                                 asdf:*system-definition-search-functions*)))))
+                 (let ((qlfile-libs-paths
+                        (directory (uiop:merge-pathnames* "qlfile-libs/**/*.asd" *load-truename*))))
+                   (flet ((clution-qlfile-libs-searcher (system-name)
+                                                        (loop
+                                                         :for path :in qlfile-libs-paths
+                                                         :if (string-equal system-name (pathname-name path))
+                                                         :return path)))
+                     (push (function clution-qlfile-libs-searcher)
+                           asdf:*system-definition-search-functions*)))
                  (let ((clution-systems-alist
                         (mapcar (lambda (p)
-                                  (cons (car p) (merge-pathnames (cdr p) *load-truename*)))
+                                  (cons (car p) (uiop:merge-pathnames* (cdr p) *load-truename*)))
                                 ',system-names-paths-alist)))
                    (flet ((clution-system-searcher (system-name)
                                                    (loop :for (name . path) :in clution-systems-alist
@@ -2434,8 +2517,7 @@ Initializes ASDF and loads the selected system."
         "%S\n"
         `(handler-case
              (progn
-               ,(when (clution--clution.qlfile-p clution)
-                  (clution--install-qlfile-libs-searcher-form clution))
+               ,(clution--install-qlfile-libs-searcher-form clution)
                ,(clution--install-system-searcher-form clution)
                ,(clution--install-output-translations-form clution)
 
@@ -2521,15 +2603,15 @@ Initializes ASDF and loads the selected system."
     (slime-eval-async
      `(cl:progn
        (swank::collect-notes
-        (cl:lambda ()
-                   (cl:dolist (system-name ',system-names)
+        (cl:lambda (cl:&aux (success cl:t))
+                   (cl:dolist (system-name ',system-names success)
                               (cl:handler-case
                                (swank::with-compilation-hooks ()
                                                               (asdf:compile-system system-name :force t))
                                (asdf:compile-error ()
-                                                   nil)
+                                                   (cl:setf success cl:nil))
                                (asdf/lisp-build:compile-file-error ()
-                                                                   nil))))))
+                                                                   (cl:setf success cl:nil)))))))
      (lexical-let ((clution clution))
        (lambda (result)
          (let ((default-directory (clution--clution.dir clution)))
@@ -2960,10 +3042,8 @@ clutions if `clution-auto-open' is enabled, and there is not already one active.
       nil)
      ((null (file-name-extension path))
       nil)
-     ((string-match-p "^clu$" (file-name-extension path))
-      (clution-open path))
-     ((string-match-p "^asd$" (file-name-extension path))
-      (clution-open-asd path nil)))))
+     ((string-match-p "^clu$\\|^asd$" (file-name-extension path))
+      (clution-open path)))))
 
 (defun clution--file-watch-callback (event)
   "Callback whenever the current clution's file changes.
@@ -3016,7 +3096,7 @@ See `file-notify-add-watch'"
 
 ;;; System templates
 
-(defun clution--insert-system-template (name dir version description author license files depends-on)
+(defun clution--insert-system-template (name dir version description author license static-files files depends-on)
   (insert
    (format "(defsystem #:%s
   :version \"%s\"
@@ -3034,6 +3114,11 @@ See `file-notify-add-watch'"
    "  :components
   (")
   (let ((first t))
+    (dolist (static-file static-files)
+      (if first
+          (setq first nil)
+        (insert "\n   "))
+      (insert (format "(:static-file \"%s\")" static-file)))
     (dolist (file files)
       (if first
           (setq first nil)
@@ -3066,7 +3151,7 @@ See `file-notify-add-watch'"
         (license (cdr (first *clution--licenses-alist*))))
     ;;Make the asd file
     (with-temp-file path
-      (clution--insert-system-template name dir version description author license (list "package" "main") '("alexandria")))
+      (clution--insert-system-template name dir version description author license (list "qlfile") (list "package" "main") '("alexandria")))
     ;;Make the qlfile
     (with-temp-file (expand-file-name "qlfile" dir)
       (insert "ql alexandria :latest
@@ -3108,7 +3193,7 @@ See `file-notify-add-watch'"
         (license (cdr (first *clution--licenses-alist*))))
     ;;Make the asd file
     (with-temp-file path
-      (clution--insert-system-template name dir version description author license (list "package" name) '("alexandria")))
+      (clution--insert-system-template name dir version description author license (list "qlfile") (list "package" name) '("alexandria")))
     ;;Make the qlfile
     (with-temp-file (expand-file-name "qlfile" dir)
       (insert "ql alexandria :latest"))
@@ -3127,6 +3212,41 @@ See `file-notify-add-watch'"
       (with-temp-file main-path
         (insert
          (format "(in-package #:%s)\n\n" name))))))
+
+(defun clution--open-clu (clu-path)
+  "Opens the clu file pointed to by `clu-path' and makes it current."
+  (when *clution--current-clution*
+    (clution-close))
+
+  (let ((clution (clution--parse-file clu-path)))
+    ;;Parse the clution file and set it as current
+    (let ((clu-dir (clution--clution.clu-dir clution)))
+      ;;Make sure the clu directory exists
+      (unless (file-exists-p clu-dir)
+        (make-directory clu-dir t)
+        (when (eq system-type 'windows-nt)
+          ;;Set it hidden on Windows
+          (clution--set-file-hidden-flag clu-dir t))))
+
+    (setf *clution--current-clution* clution)
+    (setf *clution--current-watch*
+          (file-notify-add-watch clu-path '(change) 'clution--file-watch-callback))
+    (clution--watch-systems clution)
+    (clution--sync-buffers clution)
+    (when clution-intrusive-ui
+      (clution-open-output)
+      (clution-open-clutex))
+
+    (run-hooks 'clution-open-hook)))
+
+(defun clution--enable ()
+  (clution--cl-clution-start)
+  (add-hook 'find-file-hook 'clution--find-file-hook))
+
+(defun clution--disable ()
+  (clution-close)
+  (remove-hook 'find-file-hook 'clution--find-file-hook)
+  (clution--cl-clution-stop))
 
 ;;;; Public interface
 
@@ -3212,12 +3332,6 @@ generated clution files."
 (defcustom clution-ros-path 'auto
   "Path to roswell."
   :type '(choice (const :tag "Automatically find ros in PATH." auto)
-                 (file :must-match t :tag "Use the specified path"))
-  :group 'clution)
-
-(defcustom clution-qlot-path 'auto
-  "Path to qlot."
-  :type '(choice (const :tag "Automatically find qlot in PATH and ~/.roswell/bin/" auto)
                  (file :must-match t :tag "Use the specified path"))
   :group 'clution)
 
@@ -3319,10 +3433,9 @@ generated clution files."
   (progn
     (cond
      (clution-mode
-      (add-hook 'find-file-hook 'clution--find-file-hook))
+      (clution--enable))
      (t
-      (clution-close)
-      (remove-hook 'find-file-hook 'clution--find-file-hook)))))
+      (clution--disable)))))
 
 ;;;###autoload
 (define-derived-mode clution-file-mode lisp-mode
@@ -3353,6 +3466,7 @@ generated clution files."
     (define-key map (kbd "Q") 'clution-close)
     (define-key map (kbd "A") 'clution-add-system)
     (define-key map (kbd "N") 'clution-create-system)
+    (define-key map (kbd "C-S-N") 'clution-create-directory)
     map))
 
 ;;;###autoload
@@ -3376,9 +3490,9 @@ generated clution files."
       (clution--clution.selected-system)))))
   (cond
    (*clution--current-op*
-    (message "clution: busy doing op: '%s'" (cl-getf *clution--current-op* :type)))
+    (error "clution: busy doing op: '%s'" (cl-getf *clution--current-op* :type)))
    (*clution--repl-active*
-    (message "clution: repl already active"))
+    (error "clution: repl already active"))
    (t
     (lexical-let ((system system))
       (clution-build
@@ -3396,13 +3510,13 @@ generated clution files."
   (interactive)
   (cond
    ((not *clution--current-clution*)
-    (message "clution: no clution open"))
+    (error "clution: no clution open"))
    (*clution--current-op*
-    (message "clution: busy doing op: '%s'" (cl-getf *clution--current-op* :type)))
+    (error "clution: busy doing op: '%s'" (cl-getf *clution--current-op* :type)))
    (*clution--repl-active*
     (clution--end-repl))
    (t
-    (message "clution: no repl active"))))
+    (error "clution: no repl active"))))
 
 ;;;###autoload
 (defun clution-maybe-restart-repl ()
@@ -3410,9 +3524,9 @@ generated clution files."
   (interactive)
   (cond
    ((not *clution--current-clution*)
-    (message "clution: no clution open"))
+    (error "clution: no clution open"))
    (*clution--current-op*
-    (message "clution: busy doing op: '%s'" (cl-getf *clution--current-op* :type)))
+    (error "clution: busy doing op: '%s'" (cl-getf *clution--current-op* :type)))
    (*clution--repl-active*
     (clution--clear-output)
     (clution--append-output
@@ -3423,19 +3537,22 @@ generated clution files."
     (clution-repl (clution--clution.selected-system)))))
 
 ;;;###autoload
-(defun clution-qlfile-sync ()
+(defun clution-qlfile-sync (clution &optional cont)
   "Install & update qlfile packages for the current clution."
-  (interactive)
+  (interactive
+   (list
+    (cond
+     ((not *clution--current-clution*)
+      (error "clution: no clution open"))
+     (t
+      *clution--current-clution*))
+    nil))
   (cond
-   ((not *clution--current-clution*)
-    (message "clution: no clution open"))
    (*clution--current-op*
-    (message "clution: busy doing op: '%s'" (cl-getf *clution--current-op* :type)))
-   ((not (clution--clution.qlfile-p))
-    (message "clution: clution has no qlfile defined"))
+    (error "clution: busy doing op: '%s'" (cl-getf *clution--current-op* :type)))
    (t
     (clution--clear-output)
-    (clution--do-qlfile-sync *clution--current-clution*))))
+    (clution--do-qlfile-sync clution cont))))
 
 ;;;###autoload
 (defun clution-build (systems &optional cont)
@@ -3450,7 +3567,7 @@ generated clution files."
     nil))
   (cond
    (*clution--current-op*
-    (message "clution: busy doing op: '%s'" (cl-getf *clution--current-op* :type)))
+    (error "clution: busy doing op: '%s'" (cl-getf *clution--current-op* :type)))
    (*clution--repl-active*
     (clution--clear-output)
     (clution--kickoff-build-in-repl systems))
@@ -3460,18 +3577,14 @@ generated clution files."
      "No systems to build"
      "'\n\n"))
    (t
-    (lexical-let ((clution (clution--system.clution (first systems))))
+    (let ((clution (clution--system.clution (first systems))))
       (cond
-       ((and (clution--clution.qlfile-p clution)
-             (not (file-exists-p (clution--clution.qlfile-libs-dir clution))))
-        ;;Sync qlfile before build
-        (clution--clear-output)
-        (lexical-let ((systems systems)
-                      (cont cont))
-          (clution--do-qlfile-sync
-           clution
-           (lambda ()
-             (clution--do-build systems cont)))))
+       ((not (clution--clution.qlfile-libs-up-to-date clution))
+        (clution-qlfile-sync
+         clution
+         (lexical-let ((systems systems)
+                       (cont cont))
+           (lambda () (clution--do-build systems cont)))))
        (t
         (clution--clear-output)
         (clution--do-build systems cont)))))))
@@ -3488,7 +3601,7 @@ generated clution files."
       (clution--clution.selected-system)))))
   (cond
    (*clution--current-op*
-    (message "clution: busy doing op: '%s'" (cl-getf *clution--current-op* :type)))
+    (error "clution: busy doing op: '%s'" (cl-getf *clution--current-op* :type)))
    (*clution--repl-active*
     ;;Kill repl and try again
     (clution--end-repl)
@@ -3512,7 +3625,7 @@ generated clution files."
       (clution--clution.selected-system)))))
   (cond
    (*clution--current-op*
-    (message "clution: busy doing op: '%s'" (cl-getf *clution--current-op* :type)))
+    (error "clution: busy doing op: '%s'" (cl-getf *clution--current-op* :type)))
    (t
     (lexical-let ((system system))
       (clution-build
@@ -3533,7 +3646,7 @@ generated clution files."
     nil))
   (cond
    (*clution--current-op*
-    (message "clution: busy doing op: '%s'" (cl-getf *clution--current-op* :type)))
+    (error "clution: busy doing op: '%s'" (cl-getf *clution--current-op* :type)))
    ((null systems)
     (clution--clear-output)
     (clution--append-output
@@ -3562,12 +3675,18 @@ generated clution files."
          t))
   (unless (string-equal (file-name-extension path) "clu")
     (setf path (concat path ".clu")))
-  (let ((clution (clution--make-clution (list) path)))
-    (clution--save-clution clution))
 
-  (when open
-    (clution-open path)
-    (select-window (clution--clutex-open-file path))))
+  (setf path (expand-file-name path))
+
+  (when (or (not (file-exists-p path))
+            (y-or-n-p (format "file '%s' already exists. overwrite?" path)))
+    ;;Create the clution file
+    (clution--cl-clution-eval
+     `(create-clu ',path))
+
+    (when open
+      (clution-open path)
+      (select-window (clution--clutex-open-file path)))))
 
 (defvar *clution--licenses-alist*
   '((mit . "MIT")
@@ -3584,130 +3703,74 @@ generated clution files."
 (defvar clution--system-type-history nil)
 
 ;;;###autoload
-(defun clution-create-system (type name dir &optional open)
+(defun clution-create-system (clution parent-dir &optional open)
   "Create a new clution file at `path'"
   (interactive
    (list
-    (clution--read-system-type "System type: ")
-    (string-remove-suffix ".asd" (read-string "System name: "))
-    (read-directory-name "System directory: ")
+    *clution--current-clution*
+    nil
     t))
+  (clution--create-system clution parent-dir))
 
-  (let ((path (expand-file-name (concat name ".asd") dir)))
-    (when (file-exists-p path)
-      (error "clution: system already exists at '%s'" path))
-
-    (if-let ((template-fn (cdr (assoc type clution-system-template-alist))))
-        (progn
-          (unless (file-exists-p dir)
-            (make-directory dir t))
-          (funcall template-fn path))
-      (error "clution: no template vailable for '%s'" type))
-    (when open
-      (cond
-       (*clution--current-clution*
-        (clution--add-system *clution--current-clution* path type))
-       (t
-        (clution-open-asd path type)))
-      (select-window (clution--clutex-open-file path)))))
+(defun clution-create-directory (clution parent-dir)
+  (interactive
+   (list
+    (cond
+     ((not *clution--current-clution*)
+      (error "clution: no clution open"))
+     (t *clution--current-clution*))
+    nil))
+  (clution--add-directory clution parent-dir))
 
 ;;;###autoload
-(defun clution-add-system (clution path type)
+(defun clution-add-system (clution parent-dir)
   (interactive
-   (list *clution--current-clution*
-         nil
-         nil))
-  (cond
-   ((not clution)
-    (message "clution: no clution open"))
-   (t
-    (when (and (not path) (interactive-p))
-      (setf path (clution--read-file-name "add existing system to clution: " nil nil t)))
-    (when (and (not type) (interactive-p))
-      (setf type (clution--read-system-type "System type: ")))
-    (clution--add-system clution path type))))
+   (list
+    (cond
+     ((not *clution--current-clution*)
+      (error "clution: no clution open"))
+     (t *clution--current-clution*))
+    nil))
+  (clution--add-system clution parent-dir))
 
 ;;;###autoload
-(defun clution-set-qlfile (path)
+(defun clution-open (path type)
+  "Opens `path' and sets it as the current clution.
+If the path points to a clution file, open it.
+If the path points to an asd file, open the autogenerated clution for it."
   (interactive
-   (list nil))
-  (cond
-   ((not *clution--current-clution*)
-    (message "clution: no clution open"))
-   (*clution--current-op*
-    (message "clution: busy doing op: '%s'" (cl-getf *clution--current-op* :type)))
-   (t
-    (unless path
-      (setq path (clution--read-file-name "qlfile path open: " (clution--clution.dir) "qlfile" t)))
-    (let ((replace (or (not (clution--clution.qlfile-p))
-                       (y-or-n-p (format "clution already has qlfile (%s), replace?" (clution--clution.qlfile-path))))))
-      (clution--clution.set-qlfile-path path)))))
-
-;;;###autoload
-(defun clution-open (path)
-  "Opens `path' and sets it as the current clution."
-  (interactive
-   (list (clution--read-file-name "clution to open: " nil nil t)))
-
-  (when *clution--current-clution*
-    (let ((clution-intrusive-ui (not clution-intrusive-ui)))
-      (clution-close)))
-
-  (clution--cl-clution-start)
-  (let* ((path (expand-file-name path))
-         (clution (clution--parse-file path)))
-    (let ((clu-dir (clution--clution.clu-dir clution)))
-      (unless (file-exists-p clu-dir)
-        (make-directory clu-dir t)
-        (when (eq system-type 'windows-nt)
-          (clution--set-file-hidden-flag clu-dir t))))
-
-    (setf *clution--current-clution* clution)
-    (setf *clution--current-watch*
-          (file-notify-add-watch path '(change) 'clution--file-watch-callback))
-    (clution--watch-systems clution)
-    (clution--sync-buffers clution))
-
-  (when clution-intrusive-ui
-    (clution-open-output)
-    (clution-open-clutex))
-
-  (run-hooks 'clution-open-hook))
-
-;;;###autoload
-(defun clution-open-asd (path type)
-  "Opens `path' and sets it as the current clution."
-  (interactive
-   (list (clution--read-file-name "asd to open: " nil nil t)
+   (list (clution--read-file-name "clution/asd to open: " nil nil t)
          nil))
 
-  (when *clution--current-clution*
-    (clution-close))
-
   (let* ((path (expand-file-name path))
-         (asd-clution-dir
-          (file-name-as-directory
-           (expand-file-name
-            (file-name-base path)
-            (clution--asd-clution-dir))))
-         (asd-clution-path
-          (expand-file-name
-           (concat (file-name-base path) ".clu")
-           asd-clution-dir)))
-    (unless (file-exists-p asd-clution-path)
-      (unless type
-        (setf type (clution--read-system-type "System type: ")))
-      (clution--cl-clution-start)
-      (let ((clution (clution--make-asd-clution path type)))
-        (clution--save-clution clution)))
-    (clution-open asd-clution-path)))
+         (ext (file-name-extension path)))
+    (cond
+     ((string= ext "clu")
+      ;;Just open the clu file
+      (clution--open-clu path))
+     ((string= ext "asd")
+      ;;Figure out where the autogenerated clution is
+      (let* ((asd-clution-path (clution--asd-clution-path path)))
+        ;;Make sure the autogenerated clution exists
+        (unless (file-exists-p asd-clution-path)
+          (unless type
+            (setf type (clution--read-system-type "System type: ")))
+          ;;Create the clution file
+          (clution--cl-clution-eval
+           `(create-clu ',asd-clution-path))
+          ;;Add the system to it
+          (clution--cl-clution-eval
+           `(add-clu-system ',asd-clution-path nil ',path ',type)))
+
+        ;;Open the autogenerated clution file
+        (clution--open-clu asd-clution-path)))
+     (t
+      (error "clution: unrecognized file '%s'" path)))))
 
 ;;;###autoload
 (defun clution-close ()
   "Close the currently open clution, ending a repl if it is active."
   (interactive)
-  (clution--cl-clution-stop)
-
   (when *clution--current-clution*
     (when *clution--repl-active*
       (clution-end-repl))

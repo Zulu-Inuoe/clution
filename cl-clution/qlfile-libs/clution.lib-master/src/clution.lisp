@@ -88,20 +88,34 @@ using `fetch-dir' as the temporary fetch directory and outputting to `libs-dir'"
       (select #'asd-file-system-component-path)
       (%sync-qlfiles fetch-dir libs-dir)))
 
-(defun clu-has-qlfiles (clu-file)
+(defun %clu-qlfiles (clu-file)
   (-> (clu-file-systems clu-file)
       (select #'clu-file-system-item-path)
       (select #'read-asd-file)
       (select-many #'asd-file-systems)
       (select #'%asd-file-system-qlfile-component)
       (where #'identity)
-      (any)))
+      (select #'asd-file-system-component-path)))
+
+(defun clu-has-qlfiles (clu-file)
+  (any (%clu-qlfiles clu-file)))
 
 (defun clu-qlfile-libs-up-to-date (clu-file)
-  ;;TODO needs better impl
-  (or (not (clu-has-qlfiles clu-file))
-      (and (uiop:directory-exists-p (clu-file-qlfile-libs-dir clu-file))
-           t)))
+  (let* ((qlfiles (%clu-qlfiles clu-file))
+         (qlfile-libs-dir (clu-file-qlfile-libs-dir clu-file))
+         (qlfile-fetch-dir (clu-file-qlfile-fetch-dir clu-file))
+         (qlfile-fetch-qlfile (%expand-pathname "qlfile" qlfile-fetch-dir)))
+    (or (not (any qlfiles))
+        (and (uiop:directory-exists-p qlfile-libs-dir)
+             (uiop:directory-exists-p qlfile-fetch-dir)
+             (uiop:file-exists-p qlfile-fetch-qlfile)
+             (all qlfiles
+                  (lambda (qlfile)
+                    (and (uiop:file-exists-p qlfile)
+                         (uiop:timestamp<
+                          (uiop:safe-file-write-date qlfile)
+                          (uiop:safe-file-write-date qlfile-fetch-qlfile)))))
+             t))))
 
 (defun clu-sync-qlfiles (clu-file)
   "Sync the qlfiles of systems in `clu-file'"

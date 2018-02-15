@@ -294,27 +294,45 @@ See `clution--clution.selected-system'"
          (system-path (clution--system.path system))
          (dir (clution--component.path component))
          (id (cdr (clution--component.id component)))
-         (file (string-remove-suffix ".lisp" (read-string "new file name: "))))
+         (file (expand-file-name (clution--read-file-name "new file name: " dir) dir))
+         (is-static-file
+          (or (and (null (file-name-extension file))
+                   (string= (file-name-base file) "qlfile"))
+              (and (file-name-extension file)
+                   (not (string= (file-name-extension file) "lisp"))))))
 
-    ;;Make sure module dir exists
-    (unless (file-exists-p dir)
-      (make-directory dir t))
+    ;;Ensure the module is unfolded in clutex
+    (clution--component.set-folded component nil)
 
-    (let ((file-name (expand-file-name
-                      (concat file ".lisp")
-                      dir)))
-      (when (or (not (file-exists-p file-name))
-                (y-or-n-p (format "file '%s' already exists. overwrite?" file-name)))
+    (unless is-static-file
+      ;;Ensure it has a .lisp extension
+      (setf file (concat (file-name-sans-extension file) ".lisp")))
+
+    (when (or (not (file-exists-p file))
+              (y-or-n-p (format "file '%s' already exists. overwrite?" file)))
+      ;;Ensure the target directory exists
+      (let ((file-dir (file-name-directory file)))
+        (unless (file-exists-p file-dir)
+          (make-directory file-dir t)))
+      (cond
+       (is-static-file
+        (with-temp-buffer
+          (write-region nil nil file nil nil nil t)))
+       (t
         (with-temp-buffer
           (insert
            (format "(in-package #:%s)\n" (clution--system.name system)))
-          (write-region nil nil file-name nil nil nil t)))
+          (write-region nil nil file nil nil nil t)))))
 
-      ;;Ensure the module is unfolded in clutex
-      (clution--component.set-folded component nil)
-
+    (cond
+     (is-static-file
       (clution--cl-clution-eval
-       `(add-file-component ',system-path ',id ',file)))))
+       `(add-static-file-component ',system-path ',id ',file)))
+     (t
+      (let ((file-no-extension
+             (file-name-sans-extension file)))
+        (clution--cl-clution-eval
+         `(add-file-component ',system-path ',id ',file-no-extension)))))))
 
 (defun clution--create-system-module (component)
   (let* ((system (clution--component.system component))

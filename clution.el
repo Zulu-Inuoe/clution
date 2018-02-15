@@ -325,7 +325,7 @@ See `clution--clution.selected-system'"
 
     ;;Create the directory if it does not exist
     (unless (file-exists-p module)
-      (make-directory dir-name t))
+      (make-directory module t))
 
     ;;Ensure the module is unfolded in clutex
     (clution--component.set-folded component nil)

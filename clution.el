@@ -226,7 +226,7 @@ Arguments accepted:
         (when parent-dir
           (clution--item.set-folded parent-dir nil)))
        (t
-        (clution-open-asd path type)))
+        (clution-open path type)))
       (select-window (clution--clutex-open-file path)))))
 
 (defun clution--select-system (system)

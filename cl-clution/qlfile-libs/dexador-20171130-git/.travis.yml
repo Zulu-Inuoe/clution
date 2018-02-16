@@ -1,0 +1,43 @@
+language: common-lisp
+sudo: false
+
+env:
+  global:
+    - PATH=~/.roswell/bin:~/nginx/sbin:$PATH
+    - ROSWELL_INSTALL_DIR=$HOME/.roswell
+    - COVERAGE_EXCLUDE=t
+  matrix:
+    - LISP=sbcl-bin COVERALLS=true
+    - LISP=ccl-bin
+    - LISP=abcl-bin/1.3.3
+    - LISP=ecl
+
+addons:
+  apt:
+    packages:
+      - default-jre
+
+install:
+  # Roswell
+  - curl -L https://raw.githubusercontent.com/roswell/roswell/release/scripts/install-for-ci.sh | sh
+  # nginx
+  - curl -L http://nginx.org/download/nginx-1.8.0.tar.gz | tar xzf -
+  - (cd nginx-1.8.0 && ./configure --prefix=$HOME/nginx && make && make install)
+  # prove
+  - ros install prove
+  - ros install fukamachi/clack
+
+cache:
+  directories:
+    - $HOME/.roswell
+    - $HOME/nginx
+    - $HOME/.config/common-lisp
+
+before_script:
+  - nginx -c "$TRAVIS_BUILD_DIR/t/nginx.conf" -p "$HOME/nginx"
+  - ros --version
+  - ros config
+
+script:
+  - run-prove dexador-test.asd
+  - benchmark/bench

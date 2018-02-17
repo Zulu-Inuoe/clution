@@ -36,6 +36,7 @@ ql trivial-features :latest
 ql trivial-garbage :latest
 ql trivial-gray-streams :latest
 ql trivial-mimes :latest
+ql uiop :latest
 ql usocket :latest
 ql xsubseq :latest
 ql yason :latest

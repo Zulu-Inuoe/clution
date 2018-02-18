@@ -283,11 +283,15 @@ See `clution--clution.selected-system'"
         (cond
          ((string= ext ".lisp")
           (setf new-name (string-remove-suffix ".lisp" new-name))
-          (clution--cl-clution-eval
-           `(add-file-component ',system-path ',id ',new-name)))
+          (let ((new-name-rel-to-module
+                 (file-relative-name new-name dir)))
+            (clution--cl-clution-eval
+             `(add-file-component ',system-path ',id ',new-name-rel-to-module))))
          (t
-          (clution--cl-clution-eval
-           `(add-static-file-component ',system-path ',id ',new-name))))))))
+          (let ((new-name-rel-to-module
+                 (file-relative-name new-name dir)))
+            (clution--cl-clution-eval
+             `(add-static-file-component ',system-path ',id ',new-name-rel-to-module)))))))))
 
 (defun clution--create-system-file (component)
   (let* ((system (clution--component.system component))
@@ -326,13 +330,17 @@ See `clution--clution.selected-system'"
 
     (cond
      (is-static-file
-      (clution--cl-clution-eval
-       `(add-static-file-component ',system-path ',id ',file)))
-     (t
-      (let ((file-no-extension
-             (file-name-sans-extension file)))
+      (let ((file-rel-to-module
+             (file-relative-name file dir)))
         (clution--cl-clution-eval
-         `(add-file-component ',system-path ',id ',file-no-extension)))))))
+         `(add-static-file-component ',system-path ',id ',file-rel-to-module))))
+     (t
+      (let ((file-no-extension-rel-to-module
+             (file-relative-name
+              (file-name-sans-extension file)
+              dir)))
+        (clution--cl-clution-eval
+         `(add-file-component ',system-path ',id ',file-no-extension-rel-to-module)))))))
 
 (defun clution--create-system-module (component)
   (let* ((system (clution--component.system component))
@@ -348,8 +356,11 @@ See `clution--clution.selected-system'"
     ;;Ensure the module is unfolded in clutex
     (clution--component.set-folded component nil)
 
-    (clution--cl-clution-eval
-     `(add-module-component ',system-path ',id ',module))))
+    (let ((name-rel-to-module
+           (directory-file-name
+            (file-relative-name module dir))))
+      (clution--cl-clution-eval
+       `(add-module-component ',system-path ',id ',name-rel-to-module)))))
 
 (defun clution--move-component-up (component)
   (let* ((system (clution--component.system component))

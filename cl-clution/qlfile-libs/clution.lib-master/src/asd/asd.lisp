@@ -655,9 +655,8 @@
     (unless system
       (error "system does not exist: '~A'" system-name))
 
-    (let ((*%eol-style* (asd-file-eol-style asd-file))
-          (rel-name (namestring (%relative-pathname component-name (asd-file-dir asd-file)))))
-      (system-add-file-component system (cdr component-path) rel-name))))
+    (let ((*%eol-style* (asd-file-eol-style asd-file)))
+      (system-add-file-component system (cdr component-path) component-name))))
 
 (defun asd-file-add-module-component (asd-file component-path component-name
                                       &aux
@@ -668,10 +667,8 @@
     (unless system
       (error "system does not exist: '~A'" system-name))
 
-    (let ((*%eol-style* (asd-file-eol-style asd-file))
-          (rel-name (namestring (%directory-pathname
-                                 (%relative-pathname component-name (asd-file-dir asd-file))))))
-      (system-add-module-component system (cdr component-path) rel-name))))
+    (let ((*%eol-style* (asd-file-eol-style asd-file)))
+      (system-add-module-component system (cdr component-path) component-name))))
 
 (defun asd-file-add-static-file-component (asd-file component-path component-name
                                            &aux
@@ -682,9 +679,8 @@
     (unless system
       (error "system does not exist: '~A'" system-name))
 
-    (let ((*%eol-style* (asd-file-eol-style asd-file))
-          (rel-name (namestring (%relative-pathname component-name (asd-file-dir asd-file)))))
-      (system-add-static-file-component system (cdr component-path) rel-name))))
+    (let ((*%eol-style* (asd-file-eol-style asd-file)))
+      (system-add-static-file-component system (cdr component-path) component-name))))
 
 (defun asd-file-rename-component (asd-file component-path new-name
                                   &aux

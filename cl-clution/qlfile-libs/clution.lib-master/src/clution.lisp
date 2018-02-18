@@ -54,10 +54,6 @@
   (ensure-directories-exist fetch-dir)
   (%output-concatenated-qlfile qlfile-paths fetch-qlfile-path)
 
-  ;;qlot needs a quicklisp install to work
-  (unless (uiop:directory-exists-p fetch-quicklisp-dir)
-    (qlot:install-quicklisp fetch-quicklisp-dir))
-
   ;;Ensure there's no conflicting sources
   (let ((sources (select (qlot/parser:parse-qlfile fetch-qlfile-path)
                          (lambda (s)

@@ -1,5 +1,15 @@
 (in-package #:cl-clution)
 
+;;TODO disgusting hacky hack because qlot needs a quicklisp to be installed
+(defvar *quicklisp-init*
+  #.(merge-pathnames
+         (make-pathname
+          :directory '(:relative "quicklisp")
+          :name "setup"
+          :type "lisp")
+         (or *compile-file-truename*
+             *load-truename*)))
+
 (defun clu-plist (clu-path)
   (when-let* ((clu (read-clu-file clu-path)))
     (clu-file-plist clu)))
@@ -135,6 +145,28 @@
   (unless (= (length args) 1)
     (format t "Invalid arguments~%")
     (return-from main -1))
+
+  ;;TODO Disgusting hacky hack to have quicklisp available for qlot
+  ;;qlot needs a quicklisp install to work
+  ;;Make sure we have a quicklisp install
+  (unless (find-package :ql-setup)
+    (unless (probe-file *quicklisp-init*)
+      (format t "quicklisp setup not available at '~A'" *quicklisp-init*)
+      (return-from main -1))
+    (let* ((*standard-input* (make-string-input-stream ""))
+           (*standard-output* (make-broadcast-stream))
+           (*error-output* *standard-output*)
+           (*trace-output* *standard-output*)
+           (*debug-io* (make-two-way-stream *standard-input*  *standard-output*))
+           (*query-io* *debug-io*))
+      (load *quicklisp-init* :verbose nil :print nil)))
+
+  ;;TODO Hacky hack hack:
+  ;;qlot has a #+quicklisp when defvar-ing `*system-quicklisp-home*'
+  ;;make sure to bind it if it wasn't already
+  (unless (boundp 'qlot/util:*system-quicklisp-home*)
+    (setf qlot/util:*system-quicklisp-home*
+          (symbol-value (find-symbol "*QUICKLISP-HOME*" :ql-setup))))
 
   (let ((terminator (first args))
         (eof-value (gensym)))

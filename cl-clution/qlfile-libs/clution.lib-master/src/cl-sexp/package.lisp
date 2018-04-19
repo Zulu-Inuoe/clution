@@ -27,6 +27,15 @@
    #:sexp-whitespace-node
    #:%whitespace-node-p
 
+   #:sexp-comment-node
+   #:%comment-node-p
+
+   #:sexp-feature-node
+   #:feature-type
+   #:whitespace-and-comments
+   #:feature-expr-node
+   #:%feature-node-p
+
    #:sexp-parent-node
    #:children
    #:%parent-node-p

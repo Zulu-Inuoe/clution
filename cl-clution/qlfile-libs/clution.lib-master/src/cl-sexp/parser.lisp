@@ -52,6 +52,53 @@
 (defun %whitespace-node-p (node)
   (typep node 'sexp-whitespace-node))
 
+(defclass sexp-comment-node (sexp-opaque-node)
+  ())
+
+(defun %comment-node-p (node)
+  (typep node 'sexp-comment-node))
+
+(defclass sexp-feature-node (sexp-node)
+  ((feature-type
+    :type (member :feature+ :feature-)
+    :accessor feature-type)
+   (whitespace-and-comments
+    :type list
+    :accessor whitespace-and-comments)
+   (feature-expr-node
+    :type sexp-node
+    :accessor feature-expr-node)))
+
+(defmethod print-object ((obj sexp-feature-node) stream)
+  (print-unreadable-object (obj stream :type t)
+    (format stream "~S: ~S" (feature-type obj) (feature-expr-node obj))))
+
+(defmethod %write-node ((node sexp-feature-node) stream)
+  (ecase (feature-type node)
+    (:feature+
+     (format stream "#+"))
+    (:feature-
+     (format stream "#-")))
+  (do-enumerable (n (whitespace-and-comments node))
+    (%write-node n stream))
+  (%write-node (feature-expr-node node) stream))
+
+(defmethod initialize-instance :after ((obj sexp-feature-node)
+                                       &key
+                                         feature-type
+                                         whitespace-and-comments
+                                         feature-expr)
+  (check-type feature-type (member :feature+ :feature-))
+  (check-type whitespace-and-comments enumerable)
+  (check-type feature-expr sexp-node)
+
+  (setf (slot-value obj 'feature-type) feature-type
+        (slot-value obj 'whitespace-and-comments) (to-list whitespace-and-comments)
+        (slot-value obj 'feature-expr-node) feature-expr))
+
+(defun %feature-node-p (node)
+  (typep node 'sexp-feature-node))
+
 (defclass sexp-parent-node (sexp-node)
   ((children
     :initform nil
@@ -62,7 +109,10 @@
   (typep node 'sexp-parent-node))
 
 (defun vchildren (parent-node)
-  (where (children parent-node) (lambda (n) (not (typep n 'sexp-opaque-node)))))
+  (where (children parent-node)
+         (lambda (n)
+           (and (not (%opaque-node-p n))
+                (not (%feature-node-p n))))))
 
 (defmethod initialize-instance :after ((obj sexp-parent-node) &key children)
   (setf (slot-value obj 'children) (to-list children))
@@ -270,6 +320,23 @@
     :finally
        (error "eof while reading list")))
 
+(defun %read-sexp-feature (enumerator)
+  (let ((feature-node (current enumerator)))
+    ;;Eat up nodes until we get a non-whitespace, non-comment one
+    (loop
+      :for node := (%read-sexp-node enumerator)
+      :unless node
+        :do (error "eof while reading feature")
+      :if (or (%whitespace-node-p node)
+              (%comment-node-p node))
+        :collect node :into children
+      :else
+        :return (make-instance
+                 'sexp-feature-node
+                 :feature-type (%lexeme-type feature-node)
+                 :whitespace-and-comments children
+                 :feature-expr node))))
+
 (defun %read-sexp-symbol (enumerator)
   (destructuring-bind (package external-ref-p name)
       (%lexeme-properties (current enumerator))
@@ -286,6 +353,9 @@
 
 (defun %read-sexp-whitespace (enumerator)
   (make-instance 'sexp-whitespace-node :text (%lexeme-text (current enumerator))))
+
+(defun %read-sexp-comment (enumerator)
+  (make-instance 'sexp-comment-node :text (%lexeme-text (current enumerator))))
 
 (defun %read-sexp-node (enumerator &optional dont-move-p)
   (unless (or dont-move-p (move-next enumerator))
@@ -306,8 +376,10 @@
        (%read-sexp-opaque enumerator))
       (:whitespace
        (%read-sexp-whitespace enumerator))
+      ((:feature+ :feature-)
+       (%read-sexp-feature enumerator))
       ((:line-comment :block-comment)
-       (%read-sexp-opaque enumerator)))))
+       (%read-sexp-comment enumerator)))))
 
 (defenumerable %parse-sexp-file (path)
   "Parses the sexp's in `path' and returns an `enumerable' of each node within it."

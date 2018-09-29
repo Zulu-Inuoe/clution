@@ -1,3 +1,4 @@
+;;; -*- lexical-binding: t -*-
 ;;; clution.el --- Common Lisp IDE
 
 ;; Copyright (C) 2018
@@ -128,13 +129,12 @@ Arguments accepted:
        :command command
        :filter filter
        :sentinel
-       (lexical-let ((cont cont))
-         (lambda (proc event)
-           (cl-ecase (process-status proc)
-             ((stop exit signal closed failed)
-              (when cont
-                (funcall cont (process-exit-status proc))))
-             ((run open connect listen)))))))))
+       (lambda (proc event)
+         (cl-ecase (process-status proc)
+           ((stop exit signal closed failed)
+            (when cont
+              (funcall cont (process-exit-status proc))))
+           ((run open connect listen))))))))
 
 (defun clution--translate-system-plist (system system-plist)
   (cl-labels ((translate-component-plist (system parent component-plist)
@@ -149,10 +149,8 @@ Arguments accepted:
                                                   :depends-on (cl-getf component-plist :depends-on))))
                                            (setf (cl-getf component :children)
                                                  (cl-mapcar
-                                                  (lexical-let ((component component)
-                                                                (system system))
-                                                    (lambda (c)
-                                                      (translate-component-plist system component c)))
+                                                  (lambda (c)
+                                                    (translate-component-plist system component c))
                                                   (cl-getf component-plist :components)))
                                            component)))
     (translate-component-plist system nil system-plist)))
@@ -500,14 +498,13 @@ Returns the window displaying the buffer"
 
 (defun clution--insert-clution-button (clution indent)
   (insert-char ?\s indent)
-  (lexical-let* ((clution clution)
-                 (map (make-sparse-keymap))
-                 (button
-                  (insert-button
-                   (clution--clution.name clution)
-                   'face 'clution-clutex-clution-face
-                   'help-echo (clution--clution.path clution)
-                   'keymap map)))
+  (let* ((map (make-sparse-keymap))
+         (button
+          (insert-button
+           (clution--clution.name clution)
+           'face 'clution-clutex-clution-face
+           'help-echo (clution--clution.path clution)
+           'keymap map)))
     (clution--defining-lkeys
      map
      ("C-m" (clution--clutex-open-file (clution--clution.path clution)))
@@ -561,24 +558,22 @@ Returns the window displaying the buffer"
 
 (defun clution--insert-dir-button (dir indent)
   (insert-char ?\s indent)
-  (lexical-let* ((dir dir)
-                 (clution (clution--item.clution dir))
-                 (fold-map
-                  (make-sparse-keymap))
-                 (folded (clution--item.folded dir))
-                 (fold-button
-                  (insert-button
-                   (if folded "▸ " "▾ ")
-                   'face 'clution-clutex-dir-face
-                   'help-echo nil
-                   'keymap fold-map))
-                 (map (make-sparse-keymap))
-                 (button
-                  (insert-button
-                   (concat (clution--dir.name dir) "/")
-                   'face 'clution-clutex-dir-face
-                   'help-echo nil
-                   'keymap map)))
+  (let* ((clution (clution--item.clution dir))
+         (fold-map (make-sparse-keymap))
+         (folded (clution--item.folded dir))
+         (fold-button
+          (insert-button
+           (if folded "▸ " "▾ ")
+           'face 'clution-clutex-dir-face
+           'help-echo nil
+           'keymap fold-map))
+         (map (make-sparse-keymap))
+         (button
+          (insert-button
+           (concat (clution--dir.name dir) "/")
+           'face 'clution-clutex-dir-face
+           'help-echo nil
+           'keymap map)))
     (clution--defining-lkeys
      fold-map
      ("C-m" (clution--toggle-item-fold dir))
@@ -646,31 +641,30 @@ Returns the window displaying the buffer"
 
 (defun clution--insert-system-button (system indent)
   (insert-char ?\s indent)
-  (lexical-let* ((system system)
-                 (clution (clution--system.clution system))
-                 (selected (eq system (clution--clution.selected-system)))
-                 (component (clution--system.query-node system))
-                 (loaded (clution--system.loaded system))
-                 (folded (clution--item.folded system))
-                 (fold-map (make-sparse-keymap))
-                 (fold-button
-                  (insert-button
-                   (cond
-                    ((not loaded) "✘ ")
-                    (folded "▸ ")
-                    (t "▾ "))
-                   'face 'clution-clutex-system-face
-                   'help-echo nil
-                   'keymap fold-map))
-                 (map (make-sparse-keymap))
-                 (button
-                  (insert-button
-                   (clution--system.name system)
-                   'face (if selected
-                             'clution-clutex-selected-system-face
-                           'clution-clutex-system-face)
-                   'help-echo (clution--system.path system)
-                   'keymap map)))
+  (let* ((clution (clution--system.clution system))
+         (selected (eq system (clution--clution.selected-system)))
+         (component (clution--system.query-node system))
+         (loaded (clution--system.loaded system))
+         (folded (clution--item.folded system))
+         (fold-map (make-sparse-keymap))
+         (fold-button
+          (insert-button
+           (cond
+            ((not loaded) "✘ ")
+            (folded "▸ ")
+            (t "▾ "))
+           'face 'clution-clutex-system-face
+           'help-echo nil
+           'keymap fold-map))
+         (map (make-sparse-keymap))
+         (button
+          (insert-button
+           (clution--system.name system)
+           'face (if selected
+                     'clution-clutex-selected-system-face
+                   'clution-clutex-system-face)
+           'help-echo (clution--system.path system)
+           'keymap map)))
     (cond
      (loaded
       (clution--defining-lkeys
@@ -824,22 +818,20 @@ Returns the window displaying the buffer"
 
 (defun clution--insert-module-component-button (module indent)
   (insert-char ?\s indent)
-  (lexical-let* ((module module)
-                 (fold-map
-                  (make-sparse-keymap))
-                 (fold-button
-                  (insert-button
-                   (if (clution--component.folded module) "▸ " "▾ ")
-                   'face 'clution-clutex-dir-face
-                   'help-echo nil
-                   'keymap fold-map))
-                 (map (make-sparse-keymap))
-                 (button
-                  (insert-button
-                   (concat (clution--component.name module) "/")
-                   'face 'clution-clutex-dir-face
-                   'help-echo (clution--component.path module)
-                   'keymap map)))
+  (let* ((fold-map (make-sparse-keymap))
+         (fold-button
+          (insert-button
+           (if (clution--component.folded module) "▸ " "▾ ")
+           'face 'clution-clutex-dir-face
+           'help-echo nil
+           'keymap fold-map))
+         (map (make-sparse-keymap))
+         (button
+          (insert-button
+           (concat (clution--component.name module) "/")
+           'face 'clution-clutex-dir-face
+           'help-echo (clution--component.path module)
+           'keymap map)))
     (clution--defining-lkeys
      fold-map
      ("C-m" (clution--toggle-component-fold module))
@@ -927,15 +919,14 @@ Returns the window displaying the buffer"
 
 (defun clution--insert-file-component-button (file indent)
   (insert-char ?\s indent)
-  (lexical-let* ((file file)
-                 (map (make-sparse-keymap))
-                 (button
-                  (insert-button
-                   (concat (clution--component.name file)
-                           (file-name-extension (clution--component.path file) t))
-                   'face 'clution-clutex-file-face
-                   'help-echo (clution--component.path file)
-                   'keymap map)))
+  (let* ((map (make-sparse-keymap))
+         (button
+          (insert-button
+           (concat (clution--component.name file)
+                   (file-name-extension (clution--component.path file) t))
+           'face 'clution-clutex-file-face
+           'help-echo (clution--component.path file)
+           'keymap map)))
     (clution--defining-lkeys
      map
      ("C-m" (clution--clutex-open-file (clution--component.path file)))
@@ -991,23 +982,21 @@ Returns the window displaying the buffer"
 
 (defun clution--insert-depends-on (component indent)
   (insert-char ?\s indent)
-  (lexical-let* ((component component)
-                 (depends-on (clution--component.depends-on component))
-                 (fold-map
-                  (make-sparse-keymap))
-                 (fold-button
-                  (insert-button
-                   (if (clution--depends-on.folded component) "▸ " "▾ ")
-                   'face 'clution-clutex-dependencies-face
-                   'help-echo nil
-                   'keymap fold-map))
-                 (map (make-sparse-keymap))
-                 (button
-                  (insert-button
-                   "Dependencies"
-                   'face 'clution-clutex-dependencies-face
-                   'help-echo nil
-                   'keymap map)))
+  (let* ((depends-on (clution--component.depends-on component))
+         (fold-map (make-sparse-keymap))
+         (fold-button
+          (insert-button
+           (if (clution--depends-on.folded component) "▸ " "▾ ")
+           'face 'clution-clutex-dependencies-face
+           'help-echo nil
+           'keymap fold-map))
+         (map (make-sparse-keymap))
+         (button
+          (insert-button
+           "Dependencies"
+           'face 'clution-clutex-dependencies-face
+           'help-echo nil
+           'keymap map)))
     (clution--defining-lkeys
      fold-map
      ("C-m" (clution--toggle-depends-on-fold component))
@@ -1037,13 +1026,12 @@ Returns the window displaying the buffer"
       (dolist (dependency depends-on)
         (insert "\n")
         (insert-char ?\s (+ indent 2))
-        (lexical-let* ((dependency dependency)
-                       (dep-map (make-sparse-keymap))
-                       (dep-button (insert-button
-                                    dependency
-                                    'face 'clution-clutex-dependencies-face
-                                    'help-echo nil
-                                    'keymap dep-map)))
+        (let* ((dep-map (make-sparse-keymap))
+               (dep-button (insert-button
+                            dependency
+                            'face 'clution-clutex-dependencies-face
+                            'help-echo nil
+                            'keymap dep-map)))
           (define-key dep-map (kbd "D")
             (lambda ()
               (interactive)
@@ -1249,28 +1237,6 @@ Returns the window displaying the buffer"
           (error
            (warn "clution: error loading system '%s': %s" (clution--system.name system) err)
            nil))))
-
-(defun clution--make-system (data &optional clution)
-  (unless (cl-getf data :path)
-    (error "clution: system missing :path component: %S" data))
-  (let ((res
-         (list
-          :path
-          (expand-file-name
-           (cl-getf data :path)
-           (when clution (clution--clution.dir clution)))
-          :clution clution
-          :startup-dir
-          (when-let ((dir (cl-getf data :startup-dir)))
-            (file-name-as-directory
-             (expand-file-name
-              dir
-              (when clution (clution--clution.dir clution)))))
-          :toplevel (cl-getf data :toplevel)
-          :type (cl-getf data :type)
-          :query-node nil)))
-    (clution--update-system-query res)
-    res))
 
 (defun clution--insert-cuo (cuo indent)
   (insert
@@ -1985,17 +1951,15 @@ Initializes ASDF and loads the selected system."
         :connection-type nil
         :noquery nil
         :sentinel
-        (lexical-let ((buffer clution-run-buffer)
-                      (sentinel sentinel))
-          (lambda (proc event)
-            (funcall sentinel proc event)
-            (when (eq (process-status proc) 'exit)
-              (with-current-buffer buffer
-                (let ((status (process-exit-status proc)))
-                  (insert "\n\nFinished running. Exited with code "
-                          (number-to-string status)
-                          "(0x" (format "%x" status) ")\n\n"))
-                (setq buffer-read-only t))))))
+        (lambda (proc event)
+          (funcall sentinel proc event)
+          (when (eq (process-status proc) 'exit)
+            (with-current-buffer clution-run-buffer
+              (let ((status (process-exit-status proc)))
+                (insert "\n\nFinished running. Exited with code "
+                        (number-to-string status)
+                        "(0x" (format "%x" status) ")\n\n"))
+              (setq buffer-read-only t)))))
        (select-window
         (display-buffer-in-side-window clution-run-buffer '((side . bottom)
                                                             (slot . -1))))))
@@ -2048,15 +2012,14 @@ Initializes ASDF and loads the selected system."
       (clution--append-output "Installing qlfile packages for '" (clution--clution.name clution) "'\n")
       (clution--cl-clution-eval-async
        `(sync-clu-qlfiles ',path)
-       (lexical-let ((cont cont))
-         (lambda (eval-success result)
-           (cond
-            (eval-success
-             (clution--append-output "Finished installing qlfile packages\n"))
-            (t
-             (clution--append-output "Error installing qlfile packages:\n\t" (format "%s" result))))
-           (when cont
-             (funcall cont))))))
+       (lambda (eval-success result)
+         (cond
+          (eval-success
+           (clution--append-output "Finished installing qlfile packages\n"))
+          (t
+           (clution--append-output "Error installing qlfile packages:\n\t" (format "%s" result))))
+         (when cont
+           (funcall cont)))))
      (t
       (when cont
         (funcall cont))))))
@@ -2076,12 +2039,11 @@ Initializes ASDF and loads the selected system."
          :type 'clution-build
          :build-systems systems))
 
-  (let ((success nil))
+  (let ((success nil)
+        (clution (clution--system.clution (first systems)))
+        continue-build-fn)
     (unwind-protect
-        (lexical-let ((clution (clution--system.clution (first systems)))
-                      (systems systems)
-                      (cont cont)
-                      continue-build-fn)
+        (progn
           (setf continue-build-fn
                 (lambda (system)
                   (clution--append-output
@@ -2283,16 +2245,14 @@ Initializes ASDF and loads the selected system."
             :filter (lambda (proc string)
                       (clution--append-output string))
             :cont
-            (lexical-let ((cont cont)
-                          (system-name system-name))
-              (lambda (code)
-                (setf *clution--current-op* nil)
-                (if (zerop code)
-                    (clution--append-output "\nFinished building '" system-name "'\n\n")
-                  (clution--append-output
-                   (format "\nError building '%s', exited with code %d (0x%x)\n\n" system-name code code)))
-                (when cont
-                  (funcall cont)))))))
+            (lambda (code)
+              (setf *clution--current-op* nil)
+              (if (zerop code)
+                  (clution--append-output "\nFinished building '" system-name "'\n\n")
+                (clution--append-output
+                 (format "\nError building '%s', exited with code %d (0x%x)\n\n" system-name code code)))
+              (when cont
+                (funcall cont))))))
 
       (process-send-string
        proc
@@ -2380,12 +2340,11 @@ Initializes ASDF and loads the selected system."
                                                        (cl:setf success cl:nil))
                                    (asdf/lisp-build:compile-file-error ()
                                                                        (cl:setf success cl:nil))))))))
-      (lexical-let ((clution clution))
-        (lambda (result)
-          (let ((default-directory (clution--clution.dir clution)))
-            (sly-compilation-finished result nil)
-            (clution--append-output (with-current-buffer (sly-buffer-name :compilation) (buffer-string)) "\n\n")
-            (clution--build-complete clution))))
+      (lambda (result)
+        (let ((default-directory (clution--clution.dir clution)))
+          (sly-compilation-finished result nil)
+          (clution--append-output (with-current-buffer (sly-buffer-name :compilation) (buffer-string)) "\n\n")
+          (clution--build-complete clution)))
       "COMMON-LISP-USER")))
 
 (defun clution--repl-slime-compile (systems)
@@ -2404,12 +2363,11 @@ Initializes ASDF and loads the selected system."
                                                    (cl:setf success cl:nil))
                                (asdf/lisp-build:compile-file-error ()
                                                                    (cl:setf success cl:nil)))))))
-     (lexical-let ((clution clution))
-       (lambda (result)
-         (let ((default-directory (clution--clution.dir clution)))
-           (slime-compilation-finished result)
-           (clution--append-output (with-current-buffer (slime-buffer-name :compilation) (buffer-string)) "\n\n")
-           (clution--build-complete clution))))
+     (lambda (result)
+       (let ((default-directory (clution--clution.dir clution)))
+         (slime-compilation-finished result)
+         (clution--append-output (with-current-buffer (slime-buffer-name :compilation) (buffer-string)) "\n\n")
+         (clution--build-complete clution)))
      "COMMON-LISP-USER")))
 
 (defun clution--kickoff-build-in-repl (systems)
@@ -2479,15 +2437,14 @@ Initializes ASDF and loads the selected system."
           (progn
             (clution--spawn-script
              system
-             (lexical-let ((cont cont))
-               (lambda (proc event)
-                 (cl-case (process-status proc)
-                   (exit
-                    (let ((status (process-exit-status proc)))
-                      (clution--append-output
-                       (format "Finished running. Exited with code %d(0x%x)\n\n" status status)))
-                    (clution--run-complete)
-                    (when cont (funcall cont)))))))
+             (lambda (proc event)
+               (cl-case (process-status proc)
+                 (exit
+                  (let ((status (process-exit-status proc)))
+                    (clution--append-output
+                     (format "Finished running. Exited with code %d(0x%x)\n\n" status status)))
+                  (clution--run-complete)
+                  (when cont (funcall cont))))))
             (setf success t))
         (unless success
           (setq *clution--current-op* nil))))))
@@ -2547,7 +2504,7 @@ Initializes ASDF and loads the selected system."
     (advice-add 'sly-mrepl-on-connection :around 'clution--sly-mrepl-on-connection-advice))
 
   ;;Set up hooks for successful connect and failed start
-  (lexical-let (connected-hook start-failed-hook)
+  (let (connected-hook start-failed-hook)
     ;;Set up hook for when we successfully connect to SLIME
     (setf connected-hook
           (lambda ()
@@ -2561,7 +2518,7 @@ Initializes ASDF and loads the selected system."
               (clution--display-in-repl-window (process-buffer (sly-inferior-process))))
 
             ;;Set up hook to detect slime repl disconnecting
-            (lexical-let (net-close-hook)
+            (let (net-close-hook)
               (setf net-close-hook
                     (lambda (proc)
                       (remove-hook 'sly-net-process-close-hooks net-close-hook)
@@ -2588,40 +2545,38 @@ Initializes ASDF and loads the selected system."
            :program-args (rest command)
            :directory (clution--system.startup-dir system)
            :init
-           (lexical-let ((system system))
-             (lambda (port-filename coding-system)
-               (format "(progn %s %S)\n\n"
-                       (funcall sly-init-function port-filename coding-system)
-                       (clution--repl-form system)))))))
+           (lambda (port-filename coding-system)
+             (format "(progn %s %S)\n\n"
+                     (funcall sly-init-function port-filename coding-system)
+                     (clution--repl-form system)))))
+         (sly-inferior-process (get-buffer-process sly-inferior-buffer))
+         (prev-sentinel (process-sentinel sly-inferior-process))
+         connected-hook)
 
-    (lexical-let* ((sly-inferior-process (get-buffer-process sly-inferior-buffer))
-                   (prev-sentinel (process-sentinel sly-inferior-process))
-                   connected-hook)
+    ;;Set up a hook for when we successfully connect, since we won't need to detect
+    ;;a failed startup any more
+    (setq connected-hook
+          (lambda ()
+            ;;Remove the hook
+            (remove-hook 'sly-connected-hook connected-hook)
+            ;;Restore the previous sentinel
+            (set-process-sentinel sly-inferior-process prev-sentinel)))
 
-      ;;Set up a hook for when we successfully connect, since we won't need to detect
-      ;;a failed startup any more
-      (setq connected-hook
-            (lambda ()
-              ;;Remove the hook
-              (remove-hook 'sly-connected-hook connected-hook)
-              ;;Restore the previous sentinel
-              (set-process-sentinel sly-inferior-process prev-sentinel)))
+    (add-hook 'sly-connected-hook connected-hook)
 
-      (add-hook 'sly-connected-hook connected-hook)
-
-      ;;Install a sentinel for when inferior lisp dies before sly is set up
-      ;;This way we can detect a failed start
-      (set-process-sentinel sly-inferior-process
-                            (lambda (proc event)
-                              (cl-case (process-status proc)
-                                (exit
-                                 ;;Remove the hook
-                                 (remove-hook 'sly-connected-hook connected-hook)
-                                 ;;Restore the previous sentinel
-                                 (set-process-sentinel sly-inferior-process prev-sentinel)
-                                 ;;Notify that it failed to start
-                                 (clution--repl-start-failed)))
-                              (funcall prev-sentinel proc event))))
+    ;;Install a sentinel for when inferior lisp dies before sly is set up
+    ;;This way we can detect a failed start
+    (set-process-sentinel sly-inferior-process
+                          (lambda (proc event)
+                            (cl-case (process-status proc)
+                              (exit
+                               ;;Remove the hook
+                               (remove-hook 'sly-connected-hook connected-hook)
+                               ;;Restore the previous sentinel
+                               (set-process-sentinel sly-inferior-process prev-sentinel)
+                               ;;Notify that it failed to start
+                               (clution--repl-start-failed)))
+                            (funcall prev-sentinel proc event)))
 
     (when (and clution-intrusive-ui
                clution-show-inferior-start)
@@ -2652,7 +2607,7 @@ Initializes ASDF and loads the selected system."
     (advice-add 'slime-repl-connected-hook-function :around 'clution--slime-repl-connected-hook-function-advice))
 
   ;;Set up hooks for successful connect and failed start
-  (lexical-let (connected-hook start-failed-hook)
+  (let (connected-hook start-failed-hook)
     ;;Set up hook for when we successfully connect to SLIME
     (setf connected-hook
           (lambda ()
@@ -2666,7 +2621,7 @@ Initializes ASDF and loads the selected system."
               (clution--display-in-repl-window (process-buffer (slime-inferior-process))))
 
             ;;Set up hook to detect slime repl disconnecting
-            (lexical-let (net-close-hook)
+            (let (net-close-hook)
               (setf net-close-hook
                     (lambda (proc)
                       (remove-hook 'slime-net-process-close-hooks net-close-hook)
@@ -2700,35 +2655,34 @@ Initializes ASDF and loads the selected system."
             (if clution-intrusive-ui
                 (save-window-excursion
                   (do-start))
-              (do-start)))))
-    (lexical-let* ((slime-inferior-process (get-buffer-process slime-inferior-buffer))
-                   (prev-sentinel (process-sentinel slime-inferior-process))
-                   connected-hook)
+              (do-start))))
+         (slime-inferior-process (get-buffer-process slime-inferior-buffer))
+         (prev-sentinel (process-sentinel slime-inferior-process))
+         connected-hook)
+    ;;Set up a hook for when we successfully connect, since we won't need to detect
+    ;;a failed startup any more
+    (setq connected-hook
+          (lambda ()
+            ;;Remove the hook
+            (remove-hook 'slime-connected-hook connected-hook)
+            ;;Restore the previous sentinel
+            (set-process-sentinel slime-inferior-process prev-sentinel)))
 
-      ;;Set up a hook for when we successfully connect, since we won't need to detect
-      ;;a failed startup any more
-      (setq connected-hook
-            (lambda ()
-              ;;Remove the hook
-              (remove-hook 'slime-connected-hook connected-hook)
-              ;;Restore the previous sentinel
-              (set-process-sentinel slime-inferior-process prev-sentinel)))
+    (add-hook 'slime-connected-hook connected-hook)
 
-      (add-hook 'slime-connected-hook connected-hook)
-
-      ;;Install a sentinel for when inferior lisp dies before sly is set up
-      ;;This way we can detect a failed start
-      (set-process-sentinel slime-inferior-process
-                            (lambda (proc event)
-                              (cl-case (process-status proc)
-                                (exit
-                                 ;;Remove the hook
-                                 (remove-hook 'slime-connected-hook connected-hook)
-                                 ;;Restore the previous sentinel
-                                 (set-process-sentinel slime-inferior-process prev-sentinel)
-                                 ;;Notify that it failed to start
-                                 (clution--repl-start-failed)))
-                              (funcall prev-sentinel proc event))))
+    ;;Install a sentinel for when inferior lisp dies before sly is set up
+    ;;This way we can detect a failed start
+    (set-process-sentinel slime-inferior-process
+                          (lambda (proc event)
+                            (cl-case (process-status proc)
+                              (exit
+                               ;;Remove the hook
+                               (remove-hook 'slime-connected-hook connected-hook)
+                               ;;Restore the previous sentinel
+                               (set-process-sentinel slime-inferior-process prev-sentinel)
+                               ;;Notify that it failed to start
+                               (clution--repl-start-failed)))
+                            (funcall prev-sentinel proc event)))
 
     ;;If we want to show the inferior buffer during startup, do so
     (when (and clution-intrusive-ui
@@ -2765,13 +2719,13 @@ Initializes ASDF and loads the selected system."
         t)))
     (slime
      (when (slime-connected-p)
-       (lexical-let ((sentinel
-                      (lambda (proc message)
-                        (cl-assert (process-status proc) 'closed)
-                        (let* ((inferior (slime-inferior-process proc)))
-                          (when inferior (delete-process inferior))
-                          (slime-net-close proc))
-                        (clution--start-repl (clution--clution.selected-system)))))
+       (let ((sentinel
+              (lambda (proc message)
+                (cl-assert (process-status proc) 'closed)
+                (let* ((inferior (slime-inferior-process proc)))
+                  (when inferior (delete-process inferior))
+                  (slime-net-close proc))
+                (clution--start-repl (clution--clution.selected-system)))))
          (slime-quit-lisp-internal (slime-connection) sentinel t))))))
 
 (defun clution--end-repl ()
@@ -2782,15 +2736,15 @@ Initializes ASDF and loads the selected system."
        (sly-quit-lisp t)))
     (slime
      (when (slime-connected-p)
-       (lexical-let ((sentinel
-                      (lambda (proc message)
-                        (cl-assert (process-status proc) 'closed)
-                        (let* ((inferior (slime-inferior-process proc)))
-                          (when inferior (delete-process inferior))
-                          (slime-net-close proc))
+       (let ((sentinel
+              (lambda (proc message)
+                (cl-assert (process-status proc) 'closed)
+                (let* ((inferior (slime-inferior-process proc)))
+                  (when inferior (delete-process inferior))
+                  (slime-net-close proc))
 
-                        (when (featurep 'slime-repl)
-                          (slime-kill-all-buffers)))))
+                (when (featurep 'slime-repl)
+                  (slime-kill-all-buffers)))))
          (slime-quit-lisp-internal (slime-connection) sentinel t))))))
 
 (defun clution--repl-start-failed ()
@@ -3074,7 +3028,7 @@ See `file-notify-add-watch'"
                  (const :tag "ccl" ccl))
   :group 'clution)
 
-(defcustom clution-run-style 'comint
+(defcustom clution-run-style 'term
   "How to 'run' a clution."
   :type '(choice (const :tag "Run process inside emacs window via comint" comint)
                  (const :tag "Run process in external terminal" term))
@@ -3286,15 +3240,14 @@ generated clution files."
    (*clution--repl-active*
     (error "clution: repl already active"))
    (t
-    (lexical-let ((system system))
-      (clution-build
-       (list system)
-       (lambda ()
-         (clution--clear-output)
-         (clution--append-output
-          "Starting repl for: '" (clution--system.name system)
-          "'\n\n")
-         (clution--start-repl system)))))))
+    (clution-build
+     (list system)
+     (lambda ()
+       (clution--clear-output)
+       (clution--append-output
+        "Starting repl for: '" (clution--system.name system)
+        "'\n\n")
+       (clution--start-repl system))))))
 
 ;;;###autoload
 (defun clution-end-repl ()
@@ -3374,9 +3327,7 @@ generated clution files."
        ((not (clution--clution.qlfile-libs-up-to-date clution))
         (clution-qlfile-sync
          clution
-         (lexical-let ((systems systems)
-                       (cont cont))
-           (lambda () (clution--do-build systems cont)))))
+         (lambda () (clution--do-build systems cont))))
        (t
         (clution--clear-output)
         (clution--do-build systems cont)))))))
@@ -3399,11 +3350,10 @@ generated clution files."
     (clution--end-repl)
     (clution-run system))
    (t
-    (lexical-let ((system system))
-      (clution-build
-       (list system)
-       (lambda ()
-         (clution--do-run system)))))))
+    (clution-build
+     (list system)
+     (lambda ()
+       (clution--do-run system))))))
 
 ;;;###autoload
 (defun clution-publish (system)
@@ -3419,11 +3369,10 @@ generated clution files."
    (*clution--current-op*
     (error "clution: busy doing op: '%s'" (cl-getf *clution--current-op* :type)))
    (t
-    (lexical-let ((system system))
-      (clution-build
-       (list system)
-       (lambda ()
-         (clution--do-publish system)))))))
+    (clution-build
+     (list system)
+     (lambda ()
+       (clution--do-publish system))))))
 
 ;;;###autoload
 (defun clution-clean (systems &optional cont)
@@ -3446,8 +3395,7 @@ generated clution files."
      "'\n\n"))
    (t
     (clution--clear-output)
-    (lexical-let ((clution (clution--system.clution (first systems)))
-                  (cont cont))
+    (let ((clution (clution--system.clution (first systems))))
       (clution--append-output
        "Clean starting: '" (clution--clution.name clution)
        "'\n\n")

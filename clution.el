@@ -490,6 +490,27 @@ Returns the window displaying the buffer"
             mru)
         (get-buffer-window (switch-to-buffer buffer))))))
 
+(defun clution--next-line-button ()
+  "Moves the cursor to the first button on the next line."
+  (interactive)
+  (when-let ((button (next-button (line-beginning-position 2))))
+    (goto-char (button-start button))))
+
+(defun clution--prev-line-button ()
+  "Moves the cursor to the first button on the previous line."
+  (interactive)
+  (when-let ((button (next-button (line-beginning-position 0) t)))
+    (goto-char (button-start button))))
+
+(defun clution--clutex-invoke-line ()
+  "Invokes the key sequence on the first button on the current line."
+  (interactive)
+  (when-let* ((button (or (button-at (point))
+                          (next-button (line-beginning-position))))
+              (keymap (button-get button 'keymap))
+              (fn (lookup-key keymap (this-command-keys-vector))))
+    (call-interactively fn)))
+
 (cl-defmacro clution--defining-lkeys (map &body keys-and-body)
   "Shorthand for making simple lambda-based keybindings"
   (let ((map-sym (gensym "MAP")))
@@ -1007,7 +1028,6 @@ Returns the window displaying the buffer"
      ("C-m" (clution--toggle-depends-on-fold component))
      ("TAB" (clution--toggle-depends-on-fold component))
      ("<mouse-1>" (clution--toggle-depends-on-fold component))
-     ("A" (clution--add-system-dependency component))
      ("A" (clution--add-system-dependency component)))
 
     (let ((mouse-menu (make-sparse-keymap)))
@@ -3210,9 +3230,16 @@ generated clution files."
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "q") 'clution-close-clutex)
     (define-key map (kbd "Q") 'clution-close)
-    (define-key map (kbd "A") 'clution-add-system)
-    (define-key map (kbd "N") 'clution-create-system)
-    (define-key map (kbd "C-S-N") 'clution-create-directory)
+    (define-key map (kbd "n") 'clution--next-line-button)
+    (define-key map (kbd "p") 'clution--prev-line-button)
+    (define-key map (kbd "A") 'clution--clutex-invoke-line)
+    (define-key map (kbd "D") 'clution--clutex-invoke-line)
+    (define-key map (kbd "N") 'clution--clutex-invoke-line)
+    (define-key map (kbd "C-S-N") 'clution--clutex-invoke-line)
+    (define-key map (kbd "TAB") 'clution--clutex-invoke-line)
+    (define-key map (kbd "RET") 'clution--clutex-invoke-line)
+    (define-key map (kbd "<delete>") 'clution--clutex-invoke-line)
+    (define-key map (kbd "S-<delete>") 'clution--clutex-invoke-line)
     map))
 
 ;;;###autoload

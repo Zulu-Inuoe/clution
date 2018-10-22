@@ -1608,7 +1608,7 @@ Returns the window displaying the buffer"
 
 (defun clution--system.startup-dir (clution-system)
   (or (cl-getf clution-system :startup-dir)
-      (clution--system.default-dir clution-system)))
+      (clution--system.dir clution-system)))
 
 (defun clution--system.type (clution-system)
   (cl-getf clution-system :system-type))

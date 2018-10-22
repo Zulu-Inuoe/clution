@@ -3616,6 +3616,13 @@ _ALIST is ignored."
     (display-buffer-in-side-window buffer `((side . ,window-pos)))))
 
 ;;;###autoload
+(defun clution-toggle-clutex ()
+  (interactive)
+  (if (window-live-p *clution--clutex-window*)
+      (clution-close-clutex)
+    (clution-open-clutex)))
+
+;;;###autoload
 (defun clution-open-clutex ()
   (interactive)
   (unless (window-live-p *clution--clutex-window*)

@@ -1121,10 +1121,8 @@ Returns the window displaying the buffer"
      (cond
       ((eq system-type 'windows-nt)
        (expand-file-name
-        "data"
-        (expand-file-name
          "clution"
-         (getenv "LOCALAPPDATA"))))
+         (getenv "LOCALAPPDATA")))
       (t
        (expand-file-name
         "clution"
@@ -1145,12 +1143,9 @@ Returns the window displaying the buffer"
   (expand-file-name
    (concat (file-name-base asd-path) ".clu")
    (file-name-as-directory
-    (expand-file-name
-     (secure-hash 'md5 asd-path)
-     (file-name-as-directory
       (expand-file-name
-       (file-name-base asd-path)
-       (clution--asd-clution-dir)))))))
+       (concat (file-name-base asd-path) "-" (secure-hash 'md5 asd-path))
+       (clution--asd-clution-dir)))))
 
 (defun clution--set-file-hidden-flag (path &optional hidden)
   (unless (eq system-type 'windows-nt)

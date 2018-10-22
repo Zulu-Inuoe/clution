@@ -3192,14 +3192,15 @@ generated clution files."
 
 ;;; Modes and maps
 
-(defvar clution-mode-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "C-S-b") 'clution-build)
-    (define-key map (kbd "<f5>") 'clution-repl)
-    (define-key map (kbd "S-<f5>") 'clution-end-repl)
-    (define-key map (kbd "C-<f5>") 'clution-run)
-    (define-key map (kbd "C-S-<f5>") 'clution-maybe-restart-repl)
-    map))
+(defvar clution-mode-map (make-sparse-keymap))
+(let ((map clution-mode-map))
+  (define-key map (kbd "C-S-b") 'clution-build)
+  (define-key map (kbd "<f5>") 'clution-repl)
+  (define-key map (kbd "S-<f5>") 'clution-end-repl)
+  (define-key map (kbd "C-<f5>") 'clution-run)
+  (define-key map (kbd "C-S-<f5>") 'clution-maybe-restart-repl)
+  (define-key map (kbd "<f8>") 'clution-toggle-clutex)
+  map)
 
 ;;;###autoload
 (define-minor-mode clution-mode
@@ -3237,21 +3238,21 @@ generated clution files."
   (setq buffer-read-only t
         truncate-lines -1))
 
-(defvar clutex-mode-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "q") 'clution-close-clutex)
-    (define-key map (kbd "Q") 'clution-close)
-    (define-key map (kbd "n") 'clution--next-line-button)
-    (define-key map (kbd "p") 'clution--prev-line-button)
-    (define-key map (kbd "A") 'clution--clutex-invoke-line)
-    (define-key map (kbd "D") 'clution--clutex-invoke-line)
-    (define-key map (kbd "N") 'clution--clutex-invoke-line)
-    (define-key map (kbd "C-S-N") 'clution--clutex-invoke-line)
-    (define-key map (kbd "TAB") 'clution--clutex-invoke-line)
-    (define-key map (kbd "RET") 'clution--clutex-invoke-line)
-    (define-key map (kbd "<delete>") 'clution--clutex-invoke-line)
-    (define-key map (kbd "S-<delete>") 'clution--clutex-invoke-line)
-    map))
+(defvar clutex-mode-map (make-sparse-keymap))
+(let ((map clutex-mode-map))
+  (define-key map (kbd "q") 'clution-close-clutex)
+  (define-key map (kbd "Q") 'clution-close)
+  (define-key map (kbd "n") 'clution--next-line-button)
+  (define-key map (kbd "p") 'clution--prev-line-button)
+  (define-key map (kbd "A") 'clution--clutex-invoke-line)
+  (define-key map (kbd "D") 'clution--clutex-invoke-line)
+  (define-key map (kbd "N") 'clution--clutex-invoke-line)
+  (define-key map (kbd "C-S-N") 'clution--clutex-invoke-line)
+  (define-key map (kbd "TAB") 'clution--clutex-invoke-line)
+  (define-key map (kbd "RET") 'clution--clutex-invoke-line)
+  (define-key map (kbd "<delete>") 'clution--clutex-invoke-line)
+  (define-key map (kbd "S-<delete>") 'clution--clutex-invoke-line)
+  map)
 
 ;;;###autoload
 (define-derived-mode clutex-mode special-mode "ClutexMode"

@@ -1190,7 +1190,7 @@ Returns the window displaying the buffer"
       (erase-buffer)
       (cond
        (clution
-        (setf default-directory (clution--clution.dir clution))
+        (setf default-directory (clution--clution.default-dir clution))
         (insert "Output buffer for '" (clution--clution.name clution) "' (" (clution--clution.dir clution) ")\n"))
        (t
         (insert "No clution open.\n"))))))
@@ -1204,7 +1204,7 @@ Returns the window displaying the buffer"
         (erase-buffer)
         (cond
          (clution
-          (setf default-directory (clution--clution.dir clution))
+          (setf default-directory (clution--clution.default-dir clution))
           (clution--populate-clutex clution buffer))
          (t
           (insert "No clution open.\n")))))
@@ -1405,7 +1405,7 @@ Returns the window displaying the buffer"
       (file-name-as-directory
        (expand-file-name
         "out"
-        (clution--clution.dir clution)))))
+        (clution--clution.default-dir clution)))))
 
 (defun clution--clution.clu-dir (&optional clution)
   (unless clution
@@ -1452,6 +1452,22 @@ Returns the window displaying the buffer"
     (setf clution *clution--current-clution*))
 
   (file-name-directory (clution--clution.path clution)))
+
+(defun clution--clution.default-dir (&optional clution)
+  (unless clution
+    (setf clution *clution--current-clution*))
+
+  (cond
+   ((and (clution--clution.systems clution)
+         (string-equal
+          (file-name-directory (directory-file-name (clution--clution.dir)))
+          (clution--asd-clution-dir)))
+    ;;If it's an asd clution and it has at least one system
+    (clution--system.dir
+     (or (clution--clution.selected-system clution)
+         (first (clution--clution.systems clution)))))
+   (t
+    (clution--clution.dir clution))))
 
 (defun clution--clution.qlfile-libs-p (&optional clution)
   (unless clution
@@ -1592,7 +1608,7 @@ Returns the window displaying the buffer"
 
 (defun clution--system.startup-dir (clution-system)
   (or (cl-getf clution-system :startup-dir)
-      (clution--system.dir clution-system)))
+      (clution--system.default-dir clution-system)))
 
 (defun clution--system.type (clution-system)
   (cl-getf clution-system :system-type))
@@ -2356,7 +2372,7 @@ Initializes ASDF and loads the selected system."
                                    (asdf/lisp-build:compile-file-error ()
                                                                        (cl:setf success cl:nil))))))))
       (lambda (result)
-        (let ((default-directory (clution--clution.dir clution)))
+        (let ((default-directory (clution--clution.default-dir clution)))
           (sly-compilation-finished result nil)
           (clution--append-output (with-current-buffer (sly-buffer-name :compilation) (buffer-string)) "\n\n")
           (clution--build-complete clution)))
@@ -2379,7 +2395,7 @@ Initializes ASDF and loads the selected system."
                                (asdf/lisp-build:compile-file-error ()
                                                                    (cl:setf success cl:nil)))))))
      (lambda (result)
-       (let ((default-directory (clution--clution.dir clution)))
+       (let ((default-directory (clution--clution.default-dir clution)))
          (slime-compilation-finished result)
          (clution--append-output (with-current-buffer (slime-buffer-name :compilation) (buffer-string)) "\n\n")
          (clution--build-complete clution)))

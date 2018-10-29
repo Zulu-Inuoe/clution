@@ -25,6 +25,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'dired)
 (require 'filenotify)
 (require 'pp)
 (require 'subr-x)

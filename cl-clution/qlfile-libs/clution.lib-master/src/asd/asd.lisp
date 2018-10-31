@@ -313,7 +313,7 @@
            (or
             (when-let ((pathname-node (system-pathname system)))
               (%expand-pathname
-               (%coerce-path-string-file pathname-node)
+               (%coerce-path-string-module pathname-node)
                dir))
             dir)))
     (flet ((add-prop (name value)
@@ -423,6 +423,41 @@
         (unless node
           (error "no such dependency: '~A'" name))
         (%delete-from-list-node depends-on node)))))
+
+(defun system-move-dependency-up (system module-path name)
+  (setf module-path (%coerce-component-path module-path))
+  (let ((module (system-component-by-path system  module-path)))
+    (unless module
+      (error "module does not exist: '~A'" module-path))
+    (let ((depends-on (component-depends-on module)))
+      (unless depends-on
+        (error "no such dependency '~A'" name))
+      (let ((node (efirst* (vchildren depends-on)
+                           (lambda (node) (string= (%coerce-name-string node) name)))))
+        (unless node
+          (error "no such dependency: '~A'" name))
+        (when-let* ((prev-node (%item-before node (to-list (vchildren depends-on)))))
+          (let ((prev-cell (member prev-node (children depends-on)))
+                (cell (member node (children depends-on))))
+            (rotatef (car prev-cell) (car cell)))
+          (module-ensure-depends-on module))))))
+
+(defun system-move-dependency-down (system module-path name)
+  (setf module-path (%coerce-component-path module-path))
+  (let ((module (system-component-by-path system  module-path)))
+    (unless module
+      (error "module does not exist: '~A'" module-path))
+    (let ((depends-on (component-depends-on module)))
+      (unless depends-on
+        (error "no such dependency '~A'" name))
+      (let ((node (efirst* (vchildren depends-on)
+                           (lambda (node) (string= (%coerce-name-string node) name)))))
+        (unless node
+          (error "no such dependency: '~A'" name))
+        (when-let* ((next-node (%item-after node (to-list (vchildren depends-on)))))
+          (let ((next-cell (member next-node (children depends-on)))
+                (cell (member node (children depends-on))))
+            (rotatef (car next-cell) (car cell))))))))
 
 (defun system-move-component-up (system component-path)
   (setf component-path (%coerce-component-path component-path))
@@ -572,7 +607,7 @@
    (or
     (when-let ((pathname-node (system-pathname (asd-file-system-node asd-file-system))))
       (%expand-pathname
-       (%coerce-path-string-file pathname-node)
+       (%coerce-path-string-module pathname-node)
        base-dir))
     base-dir)))
 
@@ -753,3 +788,27 @@
 
     (let ((*%eol-style* (asd-file-eol-style asd-file)))
       (system-remove-depends-on system (rest component-path) dependency-name))))
+
+(defun asd-file-move-dependency-up (asd-file component-path dependency-name
+                                    &aux
+                                      (system-name (first component-path)))
+  (let ((system (efirst* (asd-file-system-nodes asd-file)
+                         (lambda (system)
+                           (string= (%coerce-name-string (system-name system)) system-name)))))
+    (unless system
+      (error "system does not exist: '~A'" system-name))
+
+    (let ((*%eol-style* (asd-file-eol-style asd-file)))
+      (system-move-dependency-up system (rest component-path) dependency-name))))
+
+(defun asd-file-move-dependency-down (asd-file component-path dependency-name
+                                      &aux
+                                        (system-name (first component-path)))
+  (let ((system (efirst* (asd-file-system-nodes asd-file)
+                         (lambda (system)
+                           (string= (%coerce-name-string (system-name system)) system-name)))))
+    (unless system
+      (error "system does not exist: '~A'" system-name))
+
+    (let ((*%eol-style* (asd-file-eol-style asd-file)))
+      (system-move-dependency-down system (rest component-path) dependency-name))))

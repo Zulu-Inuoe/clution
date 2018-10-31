@@ -43,4 +43,6 @@
    #:asd-file-move-component-down
    #:asd-file-remove-component
    #:asd-file-add-depends-on
-   #:asd-file-remove-depends-on))
+   #:asd-file-remove-depends-on
+   #:asd-file-move-dependency-up
+   #:asd-file-move-dependency-down))

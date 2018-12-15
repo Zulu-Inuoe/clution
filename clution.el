@@ -47,7 +47,7 @@
 (defvar *clution--cl-clution-output* "")
 (defvar *clution--cl-clution-eval-delim* (format "%dcl-clution-eval-deliml%d" (random) (random)))
 (defvar *clution--cl-clution-cont* nil)
-(defvar *clution--cl-clution-result* (cons nil nil))
+(defvar *clution--cl-clution-result* nil)
 
 (defun clution--cl-clution-filter (proc string)
   (setf *clution--cl-clution-output* (concat *clution--cl-clution-output* string))
@@ -70,15 +70,21 @@
   (cl-case (process-status proc)
     ((exit closed failed)
      (error "clution--cl-clution died.")
-     (clution--cl-clution-start))))
+     (clution--cl-clution-stop))))
+
+(defun clution--cl-clution-ensure-proc ()
+  (unless *clution--cl-clution-proc*
+    (clution--cl-clution-start)))
 
 (defun clution--cl-clution-eval-async (sexpr &optional cont)
+  (clution--cl-clution-ensure-proc)
   (setf *clution--cl-clution-cont* cont)
   (process-send-string
    *clution--cl-clution-proc*
    (format "%S\n" sexpr)))
 
 (defun clution--cl-clution-eval (sexpr)
+  (clution--cl-clution-ensure-proc)
   (setf *clution--cl-clution-result* nil)
   (process-send-string
    *clution--cl-clution-proc*
@@ -339,7 +345,10 @@ See `clution--clution.selected-system'"
               (file-name-sans-extension file)
               dir)))
         (clution--cl-clution-eval
-         `(add-file-component ',system-path ',id ',file-no-extension-rel-to-module)))))))
+         `(add-file-component ',system-path ',id ',file-no-extension-rel-to-module)))))
+
+    ;; (find-file file)
+    ))
 
 (defun clution--create-system-module (component)
   (let* ((system (clution--component.system component))
@@ -445,6 +454,22 @@ See `clution--clution.selected-system'"
 
     (clution--cl-clution-eval
      `(remove-depends-on ',system-path ',id ',dependency))))
+
+(defun clution--move-dependency-up (component dependency)
+  (let* ((system (clution--component.system component))
+         (system-path (clution--system.path system))
+         (id (cdr (clution--component.id component))))
+
+    (clution--cl-clution-eval
+     `(move-dependency-up ',system-path ',id ',dependency))))
+
+(defun clution--move-dependency-down (component dependency)
+  (let* ((system (clution--component.system component))
+         (system-path (clution--system.path system))
+         (id (cdr (clution--component.id component))))
+
+    (clution--cl-clution-eval
+     `(move-dependency-down ',system-path ',id ',dependency))))
 
 (defvar *clution--current-clution* nil
   "The currently open clution.")
@@ -1069,6 +1094,20 @@ Returns the window displaying the buffer"
           (let ((mouse-map (make-sparse-keymap)))
             (define-key dep-map (kbd "<mouse-3>")
               mouse-map)
+
+            (define-key-after mouse-map [move-up]
+              `(menu-item "Move Up"
+                          ,(lambda ()
+                             (interactive)
+                             (clution--move-dependency-up component dependency))))
+            (define-key-after mouse-map [move-down]
+              `(menu-item "Move Down"
+                          ,(lambda ()
+                             (interactive)
+                             (clution--move-dependency-down component dependency))))
+
+            (define-key-after mouse-map [separator-remove]
+              '(menu-item "--"))
 
             (define-key-after mouse-map [remove]
               `(menu-item "Remove"
@@ -2102,7 +2141,7 @@ Initializes ASDF and loads the selected system."
                                (when cont (funcall cont)))
                               (t
                                (funcall continue-build-fn (car systems))))))))
-                    (process-send-string proc (format "%S\n" (clution--build-form system t)))
+                    (process-send-string proc (format "%S\n" (clution--build-form system nil)))
                     proc)))
           (funcall continue-build-fn (car systems))
           (setf success t))
@@ -3012,13 +3051,13 @@ See `file-notify-add-watch'"
     (clution--watch-systems clution)
     (clution--sync-buffers clution)
     (when clution-intrusive-ui
+      (clution-mode 1)
       (clution-open-output)
       (clution-open-clutex))
 
     (run-hooks 'clution-open-hook)))
 
 (defun clution--enable ()
-  (clution--cl-clution-start)
   (add-hook 'find-file-hook 'clution--find-file-hook))
 
 (defun clution--disable ()
